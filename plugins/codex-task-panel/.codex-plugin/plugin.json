@@ -1,0 +1,25 @@
+{
+  "name": "codex-task-panel",
+  "version": "0.4.0",
+  "description": "本地任务泳道看板，选择导入 TAPD 任务，绑定或新建 Codex 空会话。",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "任务看板",
+    "shortDescription": "任务泳道、TAPD 选择导入与 Codex 会话关联。",
+    "longDescription": "独立本地任务看板。通过选择界面导入 TAPD，完整保留原始内容及来源链接；本地泳道与 TAPD 状态分离。",
+    "developerName": "Local developer",
+    "category": "productivity",
+    "capabilities": [
+      "任务泳道看板",
+      "TAPD 选择导入",
+      "原始任务全文",
+      "Codex 会话关联"
+    ],
+    "defaultPrompt": "打开任务看板。",
+    "logo": "assets/icon-sidebar.svg"
+  }
+}

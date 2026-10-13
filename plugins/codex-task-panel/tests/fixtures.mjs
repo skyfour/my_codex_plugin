@@ -1,0 +1,1 @@
+export const source=(id='1',overrides={})=>({provider:'tapd',account:'100',resourceType:'tasks',sourceId:id,sourceUpdatedAt:1000,title:`任务 ${id}`,body:'<p>完整原文</p>',sender:'创建人',url:`https://www.tapd.cn/100/prong/tasks/view/${id}`,sourceState:'open',owner:'nick',...overrides});

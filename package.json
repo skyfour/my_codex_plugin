@@ -1,0 +1,13 @@
+{
+  "name": "my-codex-plugins",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "setup": "node scripts/install.mjs",
+    "prepare:plugins": "node scripts/install.mjs --prepare",
+    "validate": "node scripts/validate.mjs",
+    "test": "npm run validate && npm --prefix plugins/codex-task-panel test && npm --prefix plugins/codex-api-client test",
+    "check": "npm --prefix plugins/codex-api-client run check"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "codex-task-panel",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13.0" },
+  "scripts": {
+    "test": "node --experimental-sqlite --test tests/*.test.mjs",
+    "start": "node --experimental-sqlite servers/server.mjs",
+    "dev": "node --experimental-sqlite scripts/dev.mjs",
+    "configure": "node --experimental-sqlite scripts/configure.mjs",
+    "build": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3",
+    "dompurify": "3.3.3"
+  }
+}

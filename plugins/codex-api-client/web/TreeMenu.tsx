@@ -1,0 +1,17 @@
+import React,{useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
+import {findItem} from '../src/collections.mjs';
+
+export function TreeIcon({name}:{name:string}){
+  const paths:Record<string,string>={collection:'M3 5h6l2 2h10v13H3z M3 11h18',folder:'M3 5h6l2 2h10v13H3z',more:'M5 12h.01 M12 12h.01 M19 12h.01',right:'m9 6 6 6-6 6',down:'m6 9 6 6 6-6'};
+  return <svg className="tree-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={name==='more'?3:1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[name]}/></svg>;
+}
+export function TreeMenu({target,x,y,onClose,onChoose}:{target:{doc:any,itemId?:string},x:number,y:number,onClose:()=>void,onChoose:(action:string)=>void}){
+  const previous=useRef(document.activeElement as HTMLElement);
+  const ref=useRef<HTMLDivElement>(null),[position,setPosition]=useState({left:0,top:0});
+  const node=target.itemId?findItem(target.doc.data,target.itemId)?.item:target.doc.data,request=!!node?.request;
+  const actions=[['open','打开'],...(!request?[['request','新建请求'],['folder','新建文件夹']]:[]),['rename','重命名'],['duplicate',target.itemId?'复制':'复制集合'],...(target.itemId?[['move','移动或排序']]:[]),['run',request?'发送请求':target.itemId?'运行文件夹':'运行集合'],...(!target.itemId||request?[['export',request?'导出 cURL':'导出 Postman 文件']]:[]),['delete','删除']];
+  useLayoutEffect(()=>{const box=ref.current!.getBoundingClientRect();setPosition({left:Math.max(8,Math.min(x,innerWidth-box.width-8)),top:Math.max(8,Math.min(y,innerHeight-box.height-8))});ref.current!.querySelector('button')?.focus();},[x,y]);
+  useEffect(()=>{const outside=(e:PointerEvent)=>{if(!ref.current?.contains(e.target as Node))onClose();};const close=()=>onClose();document.addEventListener('pointerdown',outside);window.addEventListener('resize',close);const scroll=(e:Event)=>{if(!ref.current?.contains(e.target as Node))onClose();};window.addEventListener('scroll',scroll,true);return()=>{document.removeEventListener('pointerdown',outside);window.removeEventListener('resize',close);window.removeEventListener('scroll',scroll,true);if(previous.current?.isConnected&&(document.activeElement===document.body||ref.current?.contains(document.activeElement)))previous.current.focus();};},[]);
+  return createPortal(<div ref={ref} role="menu" aria-label={'操作 '+(node?.name||node?.info?.name)} className="tree-menu" style={position} onKeyDown={e=>{const buttons=Array.from(ref.current!.querySelectorAll('button'));const i=buttons.indexOf(document.activeElement as HTMLButtonElement);if(e.key==='Escape'||e.key==='Tab'){e.preventDefault();onClose();}else if(['ArrowDown','ArrowUp','Home','End'].includes(e.key)){e.preventDefault();buttons[e.key==='Home'?0:e.key==='End'?buttons.length-1:(i+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length].focus();}}}><div className="tree-menu-heading">{request?'请求':target.itemId?'文件夹':'集合'}<span>{node?.name||node?.info?.name}</span></div>{actions.map(([action,label])=><button key={action} role="menuitem" className={action==='delete'?'danger-text':''} onClick={()=>onChoose(action)}>{label}{action==='open'&&<small aria-hidden="true">↵</small>}</button>)}</div>,document.body);
+}

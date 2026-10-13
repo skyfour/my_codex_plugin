@@ -1,0 +1,1 @@
+{"mcpServers":{"codex-task-panel":{"command":"node","args":["--experimental-sqlite","servers/server.mjs"],"cwd":".","env_vars":["CODEX_HOME","TASK_PANEL_HOME","TAPD_ACCESS_TOKEN"]}}}

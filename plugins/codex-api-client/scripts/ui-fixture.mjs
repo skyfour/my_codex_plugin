@@ -1,0 +1,12 @@
+import http from 'node:http';
+import { mkdtemp,rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { startPreview } from './dev.mjs';
+const directory=await mkdtemp(join(tmpdir(),'api-ui-'));
+const fixture=http.createServer(async(req,res)=>{const chunks=[];for await(const c of req)chunks.push(c);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({url:req.url,method:req.method,headers:req.headers,body:Buffer.concat(chunks).toString()}));});
+await new Promise(r=>fixture.listen(47892,'127.0.0.1',r));
+const preview=await startPreview({port:47891,directory});
+console.log(preview.url);
+const close=async()=>{fixture.closeAllConnections();fixture.close();await preview.close();await rm(directory,{recursive:true,force:true});process.exit();};
+process.once('SIGTERM',close);process.once('SIGINT',close);

@@ -1,0 +1,64 @@
+{
+  "info": {
+    "name": "本地登录演示",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "id": "demo-login",
+      "name": "1. 登录并保存 Token",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\":\"demo\",\"password\":\"demo\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"登录成功\", () => pm.response.to.have.status(200));",
+              "pm.environment.set(\"token\", pm.response.json().token);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "demo-profile",
+      "name": "2. 使用 Token 获取用户",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/profile",
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"认证成功\", () => pm.response.to.have.status(200));",
+              "pm.test(\"Cookie 自动携带\", () => pm.expect(pm.response.json().session).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

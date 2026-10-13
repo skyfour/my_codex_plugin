@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "codex-api-client": {
+      "command": "node",
+      "args": ["--experimental-sqlite", "src/server.mjs"],
+      "cwd": ".",
+      "env_vars": ["CODEX_API_CLIENT_DATA_DIR"]
+    }
+  }
+}

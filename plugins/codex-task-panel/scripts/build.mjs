@@ -1,0 +1,16 @@
+import {mkdir,cp,writeFile,readFile,rm} from 'node:fs/promises';
+import {join,resolve} from 'node:path';
+import {execFileSync} from 'node:child_process';
+const root=resolve(new URL('..',import.meta.url).pathname),market=join(root,'dist/marketplace'),target=join(market,'plugins/codex-task-panel');
+await rm(target,{recursive:true,force:true});await mkdir(target,{recursive:true});
+for(const name of ['src','servers','ui','skills','assets','.codex-plugin','.mcp.json','package.json','package-lock.json','README.md','node_modules'])await cp(join(root,name),join(target,name),{recursive:true,force:true,dereference:true});
+await mkdir(join(target,'scripts'),{recursive:true});
+await cp(join(root,'scripts/configure.mjs'),join(target,'scripts/configure.mjs'));
+await cp(join(root,'README.md'),join(market,'README.md'));
+await writeFile(join(market,'.gitignore'),'*.sqlite*\ncredentials.json\n.dev-data/\n.DS_Store\n');
+await mkdir(join(market,'.agents/plugins'),{recursive:true});
+await writeFile(join(market,'.agents/plugins/marketplace.json'),JSON.stringify({name:'task-panel-local',interface:{displayName:'我的任务插件'},plugins:[{name:'codex-task-panel',source:{source:'local',path:'./plugins/codex-task-panel'},policy:{installation:'AVAILABLE',authentication:'ON_INSTALL'},category:'Productivity'}]},null,2));
+const pkg=JSON.parse(await readFile(join(target,'package.json'),'utf8'));pkg.scripts={start:pkg.scripts.start,configure:pkg.scripts.configure};await writeFile(join(target,'package.json'),JSON.stringify(pkg,null,2)+'\n');
+const manifest=JSON.parse(await readFile(join(target,'.codex-plugin/plugin.json'),'utf8'));
+const archive=join(root,`dist/codex-task-panel-${manifest.version}.tar.gz`);await rm(archive,{force:true});execFileSync('tar',['-czf',archive,'-C',market,'.']);
+console.log(`Marketplace: ${market}\nArchive: ${archive}`);
