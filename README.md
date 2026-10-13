@@ -4,7 +4,7 @@
 
 | 插件 | 版本 | 打开方式 |
 | --- | --- | --- |
-| [任务看板](plugins/codex-task-panel) | 0.4.0 | 打开任务看板 |
+| [任务看板](plugins/codex-task-panel) | 0.4.1 | 打开任务看板 |
 | [API 调试台](plugins/codex-api-client) | 0.1.0 | 打开 API 调试台 |
 
 ## 在其他电脑安装
@@ -37,14 +37,11 @@ node scripts/install.mjs
 
 ## 配置任务看板
 
-在终端执行：
+直接打开看板的「设置 → 数据源」，填写并保存 TAPD 工作空间 ID、账户完整姓名，再在「本地凭据」输入 Access Token 并点击「保存凭据」。令牌输入隐藏，保存后清空输入框，只在本机以 0600 权限保存，不返回到聊天。
 
-```sh
-cd plugins/codex-task-panel
-npm run configure
-```
+保存凭据后即可通过「导入任务」查询、勾选并确认。保存配置不会自动导入，也不会发起 TAPD 请求。
 
-依次填写自己的 TAPD 工作空间 ID、账户完整姓名和 Access Token（输入不回显）。不要把 Token 发到聊天。回到看板「设置 → 数据源」检查，再通过「导入任务」查询、勾选并确认。
+终端备用方式：在 `plugins/codex-task-panel` 中执行 `npm run configure`。如果设置了 `TAPD_ACCESS_TOKEN`，环境变量优先；界面会提示先移除变量并重新打开 Codex，再设置本地凭据。
 
 ## 多电脑数据边界
 

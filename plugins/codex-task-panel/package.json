@@ -1,9 +1,11 @@
 {
   "name": "codex-task-panel",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.13.0" },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "test": "node --experimental-sqlite --test tests/*.test.mjs",
     "start": "node --experimental-sqlite servers/server.mjs",

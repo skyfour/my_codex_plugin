@@ -13,7 +13,7 @@ const demoRecords=Array.from({length:31},(_,i)=>({provider:'tapd',account:'100',
 if(demo&&!store.snapshot().tasks.length){store.configure({workspaceId:'100',ownerName:'演示用户',version:store.config().version});store.applyImport(demoRecords.slice(0,6),{runId:'demo-seed'});const snap=store.snapshot();for(let i=0;i<snap.tasks.length;i++){const t=store.getTask(snap.tasks[i].id);for(const lane of snap.lanes.slice(1,i%4+1))store.moveCard({id:t.id,laneId:lane.id,version:store.getTask(t.id).version});}}
 const demoThreads=new Map(Array.from({length:32},(_,i)=>{const id=`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`;return [id,{id,title:`示例会话 ${i+1}`,cwd:process.cwd(),updatedAt:Math.floor(Date.now()/1000)-i*100}];}));
 const threadProvider={list:async({search='',cursor}={})=>{const all=[...demoThreads.values()].filter(t=>t.title.includes(search)),offset=Number(cursor??0);return {items:all.slice(offset,offset+25),nextCursor:all.length>offset+25?String(offset+25):null};},read:async id=>{const t=demoThreads.get(id);if(!t)throw Error('THREAD_UNAVAILABLE');return t;},create:async(cwd,onCreated,title)=>{const t={id:randomUUID(),cwd,title,updatedAt:Math.floor(Date.now()/1000)};demoThreads.set(t.id,t);onCreated(t);return t;}};
-const app=createPanelServer({store,...(demo?{threads:threadProvider,credentials:async()=> 'synthetic-demo-token',read:async()=>({identity:{id:'9',nick:'demo.nick',name:'演示用户'},records:demoRecords,missingIds:[]})}:{})});
+const app=createPanelServer({store,dataDir,...(demo?{threads:threadProvider,credentials:async()=> 'synthetic-demo-token',read:async()=>({identity:{id:'9',nick:'demo.nick',name:'演示用户'},records:demoRecords,missingIds:[]})}:{})});
 const token=randomUUID();let origin;
 const http=createServer(async(req,res)=>{
   try{
