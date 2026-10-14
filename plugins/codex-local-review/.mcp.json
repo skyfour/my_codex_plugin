@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "local-review": {
+      "command": "node",
+      "args": [
+        "--experimental-sqlite",
+        "servers/server.mjs"
+      ],
+      "cwd": ".",
+      "env_vars": [
+        "CODEX_HOME",
+        "LOCAL_REVIEW_HOME"
+      ]
+    }
+  }
+}

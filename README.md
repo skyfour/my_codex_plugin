@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | [任务看板](plugins/codex-task-panel) | 0.4.4 | 打开任务看板 |
 | [API 调试台](plugins/codex-api-client) | 0.1.0 | 打开 API 调试台 |
+| [本地代码审查](plugins/codex-local-review) | 0.1.0 | 打开本地代码审查 |
 
 ## 在其他电脑安装
 
@@ -19,7 +20,7 @@ node scripts/install.mjs
 
 未配置 GitHub SSH 时，克隆可改用 `git clone https://github.com/skyfour/my_codex_plugin.git`。
 
-安装脚本自动安装锁文件中的依赖、构建 API 界面、检查 API MCP，然后注册 `my-codex-plugins` 本地市场并安装两个插件。每台电脑只需运行一次；完成后重新打开 Codex 并新建聊天，在插件设置中确认启用，再输入上表的打开方式。正常使用无需手动启动后台服务。
+安装脚本自动安装锁文件中的依赖、构建 API 界面、检查插件 MCP，然后注册 `my-codex-plugins` 本地市场并安装全部插件。每台电脑只需运行一次；完成后重新打开 Codex 并新建聊天，在插件设置中确认启用，再输入上表的打开方式。正常使用无需手动启动后台服务。
 
 **请保留克隆目录**，用于后续更新。仓库分发源码，Git 直接注册不会自动安装 npm 依赖；请使用上述流程，不要只执行 `codex plugin marketplace add skyfour/my_codex_plugin`。
 
@@ -49,6 +50,7 @@ node scripts/install.mjs
 
 - 任务看板：`${CODEX_HOME:-~/.codex}/task-panel/`；`TASK_PANEL_HOME` 可自定义。每台电脑单独配置 TAPD，同一来源可重新导入；本地泳道和会话关联各自独立。
 - API 调试台：`~/Library/Application Support/Codex API Client`；`CODEX_API_CLIENT_DATA_DIR` 可自定义。集合、环境可用 Postman 导出/导入迁移；敏感值不随默认导出迁移，在新电脑重新填写。
+- 本地代码审查：`${CODEX_HOME:-~/.codex}/local-review/`；`LOCAL_REVIEW_HOME` 可自定义。保存人工评论、已审阅状态与代码快照，不依赖远程仓库或 AI。
 - 升级前可备份本地数据目录。不要将这些目录放进 Git，也不要并发使用云盘同步正在运行的 SQLite 文件。
 
 ## 开发与验证
@@ -58,6 +60,7 @@ npm run prepare:plugins
 npm test
 npm run check
 npm run test:task-panel-ui
+npm run test:local-review-ui
 ```
 
 `test:task-panel-ui` 需要 Chrome，模拟原生宿主无响应时打开导入页、查询错误恢复，以及宿主推送期间的全输入控件焦点与草稿保留。

@@ -1,0 +1,24 @@
+{
+  "name": "codex-local-review",
+  "version": "0.1.0",
+  "description": "本地人工代码审查、逐文件检查、行内评论和审查记录。",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "本地代码审查",
+    "shortDescription": "本地差异与人工审查记录",
+    "longDescription": "直接审查本地 Git 改动、提交差异或指定文件，无需远程仓库。",
+    "developerName": "Local developer",
+    "category": "developer-tools",
+    "capabilities": [
+      "本地差异",
+      "行内评论",
+      "审查记录"
+    ],
+    "defaultPrompt": "打开本地代码审查。",
+    "logo": "assets/icon-sidebar.svg"
+  }
+}

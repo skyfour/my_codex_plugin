@@ -29,7 +29,7 @@ for (const plugin of marketplace.plugins) {
 if (!prepare) {
   run('codex', ['plugin', 'marketplace', 'add', root]);
   for (const plugin of marketplace.plugins) run('codex', ['plugin', 'add', `${plugin.name}@${marketplace.name}`]);
-  console.log('安装完成。重新打开 Codex 并新建聊天，输入“打开任务看板”或“打开 API 调试台”。');
+  console.log('安装完成。重新打开 Codex 并新建聊天，输入“打开任务看板”、“打开 API 调试台”或“打开本地代码审查”。');
 } else {
   console.log('插件准备完成，未修改 Codex 安装配置。');
 }
