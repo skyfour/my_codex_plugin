@@ -4,7 +4,7 @@
 
 | 插件 | 版本 | 打开方式 |
 | --- | --- | --- |
-| [任务看板](plugins/codex-task-panel) | 0.4.3 | 打开任务看板 |
+| [任务看板](plugins/codex-task-panel) | 0.4.4 | 打开任务看板 |
 | [API 调试台](plugins/codex-api-client) | 0.1.0 | 打开 API 调试台 |
 
 ## 在其他电脑安装
@@ -60,7 +60,7 @@ npm run check
 npm run test:task-panel-ui
 ```
 
-`test:task-panel-ui` 需要 Chrome，模拟原生宿主无响应时打开导入页及查询错误恢复。
+`test:task-panel-ui` 需要 Chrome，模拟原生宿主无响应时打开导入页、查询错误恢复，以及宿主推送期间的全输入控件焦点与草稿保留。
 
 `prepare:plugins` 不修改 Codex 配置，适用于准备源码和 CI。任务面板直接运行源码；API 界面构建产物位于其 `dist/index.html`，不提交到 Git。
 

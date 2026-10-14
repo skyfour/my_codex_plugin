@@ -16,4 +16,4 @@
 - API 浏览器测试：在 `plugins/codex-api-client` 执行 `npm exec playwright -- test --config playwright.tree.config.ts`，需要 Chrome。
 - 安装流程验证使用独立临时 `CODEX_HOME`，避免覆盖用户现有插件配置。
 
-- `npm run test:task-panel-ui`：原生 MCP 宿主模拟测试，覆盖顶部导入入口、无响应刷新、查询错误恢复及带环境变量时的令牌替换，需要 Chrome。
+- `npm run test:task-panel-ui`：原生 MCP 宿主模拟测试，覆盖顶部导入入口、无响应刷新、查询错误恢复、带环境变量时的令牌替换及宿主通知期间的输入焦点、草稿和异步搜索恢复，需要 Chrome。
