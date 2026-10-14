@@ -11,6 +11,6 @@
     "validate": "node scripts/validate.mjs",
     "test": "npm run validate && npm --prefix plugins/codex-task-panel test && npm --prefix plugins/codex-api-client test",
     "check": "npm --prefix plugins/codex-api-client run check",
-    "test:task-panel-ui": "node scripts/check-task-panel-navigation.mjs"
+    "test:task-panel-ui": "node scripts/check-task-panel-navigation.mjs && node scripts/check-task-panel-credentials.mjs"
   }
 }

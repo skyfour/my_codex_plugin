@@ -20,7 +20,7 @@ export const BOARD_URI='ui://codex-task-panel/v1.html';
 export const defaultDataDir=()=>process.env.TASK_PANEL_HOME??join(process.env.CODEX_HOME??join(homedir(),'.codex'),'task-panel');
 export function createPanelServer({dataDir=defaultDataDir(),env=process.env,store=new BoardStore(join(dataDir,'board.sqlite')),credentials=()=>loadToken(dataDir,env),read,threads}={}){
   const sessions=new ThreadService(store,threads);
-  const imports=new ImportService({store,credentials,read}),server=new McpServer({name:'codex-task-panel',version:'0.4.2'}),actions=new Map(),toolDefinitions=[];
+  const imports=new ImportService({store,credentials,read}),server=new McpServer({name:'codex-task-panel',version:'0.4.3'}),actions=new Map(),toolDefinitions=[];
   const summaries=()=>{const snapshot=store.snapshot();return {...snapshot,tasks:snapshot.tasks.map(({body,...t})=>t)};};
   const status=async()=>{let credentialReady=false,credentialError=null;try{credentialReady=Boolean(await credentials());}catch(e){credentialError=errorText(e);}return {config:store.config(),credentialReady,credentialError,credentialEnv:Boolean(env.TAPD_ACCESS_TOKEN),lastImport:store.history()[0]??null};};
   const output=(data)=>({content:[{type:'text',text:'操作完成'}],structuredContent:data});
@@ -42,7 +42,7 @@ export function createPanelServer({dataDir=defaultDataDir(),env=process.env,stor
   register('thread_unbind',z.object({taskId:id,threadId:id}).strict(),({taskId,threadId})=>{store.unbindThread(taskId,threadId);return {...summaries(),threads:store.threads(taskId)};},{app:true,readonly:false});
   register('thread_create',z.object({taskId:id,requestId:id,title:z.string().trim().min(1).max(512),cwd:z.string().min(1).max(4096)}).strict(),async args=>({...await sessions.create(args),...summaries()}),{app:true,readonly:false,description:'仅响应用户点击新建会话，创建空会话并绑定；禁止发送消息或启动执行。'});
   register('source_status',empty,status);
-  register('credential_configure',z.object({token:z.string().trim().min(1).max(4096)}).strict(),async({token})=>{await saveToken(dataDir,token,env);return status();},{app:true,readonly:false,description:'仅供用户在设置界面保存本机 TAPD 凭据；不返回令牌，不发起网络请求。'});
+  register('credential_configure',z.object({token:z.string().trim().min(1).max(4096)}).strict(),async({token})=>{await saveToken(dataDir,token);return status();},{app:true,readonly:false,description:'仅供用户在设置界面保存本机 TAPD 凭据；不返回令牌，不发起网络请求。'});
   register('source_configure',z.object({workspaceId:z.string().regex(/^\d{1,32}$/),ownerName:z.string().min(1).max(128),version}).strict(),async args=>{store.configure(args);return {...summaries(),...await status()};},{app:true,readonly:false});
   register('lane_create',z.object({name:z.string().min(1).max(48)}).strict(),({name})=>{store.createLane(name);return summaries();},{app:true,readonly:false});
   register('lane_update',z.object({id,name:z.string().min(1).max(48),version}).strict(),({id,name,version})=>{store.renameLane(id,name,version);return summaries();},{app:true,readonly:false});

@@ -4,7 +4,7 @@
 
 | 插件 | 版本 | 打开方式 |
 | --- | --- | --- |
-| [任务看板](plugins/codex-task-panel) | 0.4.2 | 打开任务看板 |
+| [任务看板](plugins/codex-task-panel) | 0.4.3 | 打开任务看板 |
 | [API 调试台](plugins/codex-api-client) | 0.1.0 | 打开 API 调试台 |
 
 ## 在其他电脑安装
@@ -41,7 +41,7 @@ node scripts/install.mjs
 
 保存凭据后即可通过「导入任务」查询、勾选并确认。保存配置不会自动导入，也不会发起 TAPD 请求。
 
-终端备用方式：在 `plugins/codex-task-panel` 中执行 `npm run configure`。如果设置了 `TAPD_ACCESS_TOKEN`，环境变量优先；界面会提示先移除变量并重新打开 Codex，再设置本地凭据。
+终端备用方式：在 `plugins/codex-task-panel` 中执行 `npm run configure`。即使设置了 `TAPD_ACCESS_TOKEN`，也能直接输入并保存新令牌，保存后本地令牌立即优先生效，无需移除环境变量。旧配置在重新保存前保持原优先级。
 
 ## 多电脑数据边界
 

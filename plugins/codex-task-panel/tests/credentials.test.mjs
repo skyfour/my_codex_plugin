@@ -32,12 +32,15 @@ test('credential saves reject symlinks without changing their target',async t=>{
  await assert.rejects(()=>saveToken(dir,'synthetic-valid',{}),{message:'CREDENTIAL_FILE_PERMISSIONS'});
  assert.equal(await readFile(target,'utf8'),'keep');
 });
-test('environment credentials take priority and block misleading local saves',async t=>{
- const dir=await directory(t);await saveToken(dir,'synthetic-local',{});
- const env={TAPD_ACCESS_TOKEN:'synthetic-env'};
+test('explicit local saves override environment credentials without changing the environment',async t=>{
+ const dir=await directory(t),env={TAPD_ACCESS_TOKEN:'synthetic-env'};
  assert.equal(await loadToken(dir,env),'synthetic-env');
- await assert.rejects(()=>saveToken(dir,'synthetic-new',env),{message:'CREDENTIAL_ENV_OVERRIDE'});
- assert.equal(await loadToken(dir,{}),'synthetic-local');
+ await saveToken(dir,'synthetic-new',env);
+ assert.equal(await loadToken(dir,env),'synthetic-new');
+ assert.equal(await loadToken(dir,{}),'synthetic-new');
+ assert.equal(env.TAPD_ACCESS_TOKEN,'synthetic-env');
+ await saveToken(dir,'synthetic-replaced',env);
+ assert.equal(await loadToken(dir,env),'synthetic-replaced');
 });
 test('credential configuration is app-only and never returns the token in MCP results',async t=>{
  const dir=await directory(t),store=new BoardStore(':memory:');
@@ -61,5 +64,25 @@ test('an invalid local credential file does not prevent opening settings to repa
  try{
   const opened=await actions.get('board_open')({});assert.equal(opened.isError,undefined);assert.equal(opened.structuredContent.credentialReady,false);assert.ok(opened.structuredContent.credentialError);
   const saved=await actions.get('credential_configure')({token:'synthetic-repaired'});assert.equal(saved.structuredContent.credentialReady,true);
+ }finally{await server.close();store.close();}
+});
+
+test('legacy credential files retain environment priority until the user saves a replacement',async t=>{
+ const dir=await directory(t),env={TAPD_ACCESS_TOKEN:'synthetic-env'};
+ await writeFile(join(dir,'credentials.json'),JSON.stringify({tapdAccessToken:'synthetic-legacy'}),{mode:0o600});
+ assert.equal(await loadToken(dir,env),'synthetic-env');
+ assert.equal(await loadToken(dir,{}),'synthetic-legacy');
+ await saveToken(dir,'synthetic-updated',env);
+ assert.equal(await loadToken(dir,env),'synthetic-updated');
+});
+test('the import service uses the newly saved local token in an existing server process',async t=>{
+ const dir=await directory(t),env={TAPD_ACCESS_TOKEN:'synthetic-env'},store=new BoardStore(':memory:');
+ store.configure({workspaceId:'100',ownerName:'示例',version:1});let usedToken;
+ const {server,actions}=createPanelServer({store,dataDir:dir,env,read:async({token})=>{usedToken=token;return {identity:{id:'1',nick:'demo',name:'示例'},records:[],missingIds:[]};}});
+ try{
+  const saved=await actions.get('credential_configure')({token:'synthetic-live-update'});
+  assert.equal(saved.isError,undefined);assert.equal(saved.structuredContent.credentialReady,true);
+  const queried=await actions.get('import_preview')({});assert.equal(queried.isError,undefined);
+  assert.equal(usedToken,'synthetic-live-update');assert.ok(!JSON.stringify(saved).includes('synthetic-live-update'));
  }finally{await server.close();store.close();}
 });
