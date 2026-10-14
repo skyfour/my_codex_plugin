@@ -11,3 +11,5 @@
 数据保存在 `${CODEX_HOME:-~/.codex}/task-panel/board.sqlite`，凭据在同目录 `credentials.json`（0600）。`TASK_PANEL_HOME` 可指定独立目录；配置终端与 Codex 应使用相同环境变量。升级保留本地泳道和关联，数据库升级后不支持直接降级。
 
 开发：`npm ci`、`npm test`、`npm run dev -- --demo`。正式使用由 Codex 按需启动 stdio MCP。`npm run build` 是原独立市场打包器，统一仓库安装无需运行。
+
+顶部「＋ 导入任务」直接打开选择入口，不等待宿主刷新，也不发送 TAPD 请求。进入后点击「查询候选任务」才开始查询；缺少配置时使用「设置数据源」。

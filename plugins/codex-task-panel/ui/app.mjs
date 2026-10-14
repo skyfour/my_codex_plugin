@@ -117,7 +117,7 @@ function start(){
      if(act==='settings'){await refresh();s.view='settings';}
      if(act==='settings-source'||act==='refresh-settings'){await refresh();s.settingsTab='source';s.view='settings';}
      if(act==='history'){s.runs=(await tool('import_history')).runs;s.view='history';}
-     if(act==='import'){await refresh();s.view='import';s.preview=null;s.selected.clear();s.cache.clear();s.detail=null;s.only=false;s.page=1;s.importSearch='';s.importStatus='unfinished';}
+     if(act==='import'){s.view='import';s.preview=null;s.selected.clear();s.cache.clear();s.detail=null;s.only=false;s.page=1;s.importSearch='';s.importStatus='unfinished';}
      if(act==='query'){s.selected.clear();s.cache.clear();s.preview=null;s.only=false;s.page=1;s.preview=await tool('import_preview');s.preview.items?.forEach(t=>s.cache.set(t.sourceId,t));await loadCandidates();}
      if(act==='prev'||act==='next'){s.page+=act==='prev'?-1:1;await loadCandidates();}
      if(act==='select-page')s.items.filter(t=>t.selectable).forEach(t=>s.selected.add(t.sourceId));
@@ -142,6 +142,6 @@ function start(){
  window.addEventListener('message',event=>{if(event.source!==window.parent||event.data?.jsonrpc!=='2.0')return;const msg=event.data;if(msg.id!==undefined){const pending=requests.get(msg.id);if(!pending)return;clearTimeout(pending.timer);requests.delete(msg.id);if(msg.error)pending.reject(new Error('宿主操作失败，请重试。'));else pending.resolve(msg.result);}else if(msg.method==='ui/notifications/tool-result'){const data=msg.params?.structuredContent;if(data?.lanes&&data?.tasks){apply(data);render();}}else if(msg.method==='ui/notifications/host-context-changed'){const context=msg.params;if(context?.theme)document.documentElement.style.colorScheme=context.theme;}});
  window.addEventListener('pagehide',()=>{clearTimeout(queryTimer);for(const p of requests.values())clearTimeout(p.timer);requests.clear();});
  render();
- void(async()=>{try{if(!window.__TASK_PANEL_DEV__){const init=await request('ui/initialize',{appInfo:{name:'codex-task-panel',version:'0.4.0'},appCapabilities:{},protocolVersion:'2026-01-26'});post({method:'ui/notifications/initialized'});if(init?.hostContext?.theme)document.documentElement.style.colorScheme=init.hostContext.theme;}await refresh();s.ready=true;render();}catch(e){message(e.message,true);document.getElementById('connection').textContent='看板连接失败，请重新打开插件。';}})();
+ void(async()=>{try{if(!window.__TASK_PANEL_DEV__){const init=await request('ui/initialize',{appInfo:{name:'codex-task-panel',version:'0.4.2'},appCapabilities:{},protocolVersion:'2026-01-26'});post({method:'ui/notifications/initialized'});if(init?.hostContext?.theme)document.documentElement.style.colorScheme=init.hostContext.theme;}await refresh();s.ready=true;render();}catch(e){message(e.message,true);document.getElementById('connection').textContent='看板连接失败，请重新打开插件。';}})();
 }
 if(typeof document!=='undefined')start();
