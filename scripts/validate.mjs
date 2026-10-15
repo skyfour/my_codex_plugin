@@ -20,9 +20,27 @@ for (const plugin of marketplace.plugins) {
   assert.equal(plugin.policy.authentication, 'ON_INSTALL');
   assert.ok(plugin.category);
   const manifest = json(resolve(path, '.codex-plugin/plugin.json'));
+  assert.equal(manifest.name, plugin.name);
+  if (plugin.name === 'dbx') {
+    const release = json(resolve(path, 'release.json'));
+    const mcp = json(resolve(path, manifest.mcpServers));
+    assert.equal(release.version, manifest.version);
+    assert.equal(release.repository, 'skyfour/my_codex_plugin');
+    assert.equal(release.tag, `dbx-v${release.version}`);
+    assert.ok(Object.keys(release.artifacts).length > 0);
+    for (const artifact of Object.values(release.artifacts)) {
+      assert.match(artifact.file, /^dbx-codex-[\w.-]+\.tar\.gz$/);
+      assert.match(artifact.sha256, /^[a-f0-9]{64}$/);
+    }
+    assert.equal(mcp.mcpServers.dbx.command, './bin/dbx-codex');
+    assert.equal(mcp.mcpServers.dbx.cwd, '.');
+    assert.ok(existsSync(resolve(path, manifest.interface.logo)));
+    assert.ok(existsSync(resolve(path, 'LICENSE')));
+    console.log(`dbx ${manifest.version}: manifest、MCP 入口、发布包校验信息通过`);
+    continue;
+  }
   const pkg = json(resolve(path, 'package.json'));
   const lock = json(resolve(path, 'package-lock.json'));
-  assert.equal(manifest.name, plugin.name);
   assert.equal(pkg.name, plugin.name);
   assert.equal(manifest.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);
