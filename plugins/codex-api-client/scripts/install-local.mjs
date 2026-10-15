@@ -1,1 +1,1 @@
-await import('../../../scripts/install.mjs');
+import '../install.mjs';

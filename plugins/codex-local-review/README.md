@@ -29,7 +29,7 @@
 
 本版对齐项目打开、项目切换、工作区/历史浏览和差异审阅；暂不实现分叉后的 Git 合并、冲突解决、完整提交关系图、字符级差异或 AI 审查。提交历史展示最近 100 条，审查历史按项目分别展示最近 100 条。
 
-在仓库根目录执行 `node scripts/install.mjs` 安装/升级。验证：`npm test`、`npm run check`、`npm run test:local-review-ui`（需要 Chrome）。
+在仓库根目录执行 `npm run install:local-review` 安装；更新时先执行 `git pull --ff-only`，再运行同一命令。该命令对应此目录的独立 `install.mjs` 入口，只安装或更新代码审查。验证：`npm test`、`npm run check`、`npm run test:local-review-ui`（需要 Chrome）。
 
 参考：[Sublime Merge 官方入门文档](https://www.sublimemerge.com/docs/getting_started)、[差异上下文](https://www.sublimemerge.com/docs/diff_context)。
 
@@ -57,7 +57,7 @@ Stage 使用 `git add --all -- <所选具体文件>` 暂存当前磁盘内容（
 
 关键字由看板保存；审查服务仅在内存中保留用户已经选择并预览的提交上下文，提交时核对关键字。仍要求用户明确点击提交，保留正常 Git hooks、HEAD/分支/暂存树校验，不自动 Stage、push 或修改 TAPD。
 
-联动需要两个插件都支持提交上下文 v1。统一安装脚本自动注册看板接口；也可以启动新版任务看板完成注册。单独安装代码审查时，普通 Git 提交仍可使用，任务关联处会提示安装或更新看板。详见[领域边界与通信协议](../../docs/task-commit-context.md)。
+联动需要两个插件都支持提交上下文 v1。在仓库根目录执行 `npm run install:task-panel` 安装或更新任务看板时，会自动注册看板接口；也可以启动新版任务看板完成注册。单独安装代码审查时，普通 Git 提交仍可使用，任务关联处会提示安装或更新看板。详见[领域边界与通信协议](../../docs/task-commit-context.md)。
 
 ## 审阅与文件导航
 
