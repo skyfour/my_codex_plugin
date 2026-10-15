@@ -84,3 +84,5 @@ npm run test:local-review-ui
 一般插件放在 `plugins/<name>/`，包含 `.codex-plugin/plugin.json`、`.mcp.json`、skills、源码和锁文件，然后加入 `.agents/plugins/marketplace.json`；如有专门构建步骤，同时更新安装脚本。DBX 是原生发布包，使用 `plugins/dbx/release.json` 固定版本和 SHA-256，由安装器自动获取。
 
 市场结构参考 [OpenAI 官方插件打包文档](https://developers.openai.com/plugins/build/plugins#marketplace-metadata)。
+
+任务看板与代码审查通过[提交上下文接口](docs/task-commit-context.md)联动。安装器会将已安装看板的接口登记到本机 `${CODEX_HOME:-~/.codex}/integrations/task-commit-context-v1.json`；其中只有协议版本和入口路径，不包含凭据或任务数据。两插件更新后重开 Codex 即可使用。

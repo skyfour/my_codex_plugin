@@ -46,6 +46,11 @@ for (const plugin of plugins) {
 if (!prepare) {
   run('codex', ['plugin', 'marketplace', 'add', root]);
   for (const plugin of plugins) run('codex', ['plugin', 'add', `${plugin.name}@${marketplace.name}`]);
+  if (plugins.some(plugin => plugin.name === 'codex-task-panel')) {
+    const version=JSON.parse(readFileSync(resolve(root,'plugins/codex-task-panel/package.json'),'utf8')).version;
+    const codeHome=process.env.CODEX_HOME??resolve(process.env.HOME,'.codex');
+    run(process.execPath,['--experimental-sqlite',resolve(codeHome,'plugins/cache',marketplace.name,'codex-task-panel',version,'servers/commit-context.mjs'),'--register']);
+  }
   console.log(selectedName === 'dbx'
     ? 'DBX 安装完成。重新打开 Codex 并新建聊天，然后点击左侧 DBX 图标。'
     : '安装完成。重新打开 Codex 并新建聊天，在插件设置中确认已启用。');
