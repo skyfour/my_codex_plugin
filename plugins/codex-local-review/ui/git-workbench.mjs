@@ -5,7 +5,7 @@ function updateGitWorkbench(){
  const enabled=Boolean(project?.isGit),live=liveGit();$('gitCommandBar').hidden=!enabled;$('currentBranch').textContent=gitStatus?.branch||repository?.branch||'分离 HEAD';$('syncStatus').textContent=gitStatus?.upstream?`${gitStatus.upstream.remote}/${gitStatus.upstream.branch} · ↓${gitStatus.behind??'?'} ↑${gitStatus.ahead??'?'}`:gitStatus?.error||'未设置 upstream';
  for(const id of ['switchBranch','gitFetch','gitPull','gitPush','pullOptions','pushOptions'])$(id).disabled=busy||!enabled||!gitStatus||Boolean(gitStatus.error);
  $('gitAll').hidden=!live;$('stageAll').disabled=busy||!gitStatus?.files?.some(f=>f.canStage);$('unstageAll').disabled=busy||!gitStatus?.files?.some(f=>f.canUnstage);$('discardAll').disabled=$('stageAll').disabled;
- const current=files.find(f=>f.path===(file?.path??failedFile?.path));$('discardFile').hidden=!live||!current?.canStage;$('discardFile').disabled=busy;
+ const current=files.find(f=>f.path===(file?.path??failedFile?.path));$('discardFile').hidden=!live||!current?.canStage||fileMode==='staged';$('discardFile').disabled=busy;
  $('hunkNotice').textContent=live?(fileHunkData?.notice??''):'';$('hunkNotice').hidden=!$('hunkNotice').textContent;
  document.querySelectorAll('[data-hunk-operation]').forEach(button=>button.disabled=busy||!live);
  for(const input of document.querySelectorAll('#gitOperationForm input,#gitOperationForm select,#gitPreviewOperation,#gitCreateBranch,#gitDialog [data-close]'))input.disabled=busy;
@@ -50,32 +50,12 @@ async function quickRemote(operation){
 $('switchBranch').onclick=()=>void openGitOperation('switch');$('gitFetch').onclick=()=>void quickRemote('fetch');$('gitPull').onclick=()=>void quickRemote('pull');$('gitPush').onclick=()=>void openGitOperation('push');$('pullOptions').onclick=()=>void openGitOperation('pull',{choose:true});$('pushOptions').onclick=()=>void openGitOperation('push',{choose:true});
 $('discardFile').onclick=()=>void openGitOperation('discard',{paths:[file?.path??failedFile?.path]});$('discardAll').onclick=()=>void openGitOperation('discard');$('stageAll').onclick=()=>void stageAll('stage');$('unstageAll').onclick=()=>void stageAll('unstage');
 function hunkRange(start,count){return count?`第 ${start}${count>1?'–'+(start+count-1):''} 行`:'无对应行';}
-let rowHunks=new Map();
-function hunkContains(row,hunk){const within=(value,start,count)=>value!==null&&value>=start&&value<start+count;return within(row.old,hunk.oldStart,hunk.oldCount)||within(row.new,hunk.newStart,hunk.newCount);}
-function displayChangeBlocks(){
- rowHunks=new Map();if(!liveGit()||!fileHunkData?.token)return new Map(changeBlocks(rows).map(b=>[b.index,b.label]));
- const result=new Map(),seen=new Set(),hunks=fileHunkData.hunks;let cursor=0;
- for(let index=0;index<rows.length&&cursor<hunks.length;index++){
-  const row=rows[index];while(cursor<hunks.length&&!hunkContains(row,hunks[cursor])&&(row.old??Infinity)>=hunks[cursor].oldStart+hunks[cursor].oldCount&&(row.new??Infinity)>=hunks[cursor].newStart+hunks[cursor].newCount)cursor++;
-  const hunk=hunks[cursor];if(!hunk||!hunkContains(row,hunk))continue;rowHunks.set(index,hunk);if(seen.has(hunk.id))continue;seen.add(hunk.id);result.set(index,`改动块 ${cursor+1} · 修改前：${hunkRange(hunk.oldStart,hunk.oldCount)} → 修改后：${hunkRange(hunk.newStart,hunk.newCount)}`);
- }
- return result;
-}
-function appendHunkActions(cell,row,used){
- if(!liveGit()||!fileHunkData?.token)return;
- const hunk=rowHunks.get(row.index);if(!hunk||used.has(hunk.id))return;used.add(hunk.id);
- const actions=el('span',undefined,'hunk-actions');actions.title=`改动块范围：修改前${hunkRange(hunk.oldStart,hunk.oldCount)}，修改后${hunkRange(hunk.newStart,hunk.newCount)}`;
- for(const [operation,label] of fileHunkData.mode==='staged'?[['unstage','Unstage Hunk']]:[['discard','Discard Hunk'],['stage','Stage Hunk']]){
-  const b=button(label,()=>operation==='discard'?confirmDiscardHunk(hunk):void mutateHunk(hunk,operation));b.dataset.hunkOperation=operation;b.disabled=busy;actions.append(b);
- }
- cell.append(actions);
-}
-async function mutateHunk(hunk,operation){const context={id:project.id,path:file.path,mode:scope.mode,token:fileHunkData.token,hunkId:hunk.id,operation,confirmed:true};await run(async()=>{await call('git_hunk_apply',context);await loadChanges(context.path);},'正在处理选中的改动块…');}
-function confirmDiscardHunk(hunk){
- if(busy)return;clearTimeout(gitPreviewTimer);const context={id:project.id,path:file.path,mode:scope.mode,token:fileHunkData.token,hunkId:hunk.id,operation:'discard',confirmed:true};
+async function mutateHunk(hunk,operation){const context={id:project.id,path:file.path,mode:fileHunkData.mode,token:fileHunkData.token,hunkId:hunk.id,operation,confirmed:true};await run(async()=>{await call('git_hunk_apply',context);await loadChanges(context.path);},'正在处理选中的改动块…');}
+function confirmDiscardHunk(hunk,selectedContext){
+ if(busy)return;clearTimeout(gitPreviewTimer);const context=selectedContext??{id:project.id,path:file.path,mode:fileHunkData.mode,token:fileHunkData.token,hunkId:hunk.id,operation:'discard',confirmed:true};
  const d=gitDialogState={projectId:project.id,hunk:context,plan:{}};$('gitDialogTitle').textContent='Discard Hunk';$('gitCurrent').textContent=project.name;
  for(const id of ['gitBranchLabel','gitNewBranchLabel','gitCreateBranch','gitRemoteLabel','gitRemoteBranchLabel','gitUpstreamLabel','gitPreviewOperation'])$(id).hidden=true;
- $('gitPlanText').textContent=`丢弃 ${file.path} 中选中的未暂存改动块（修改前${hunkRange(hunk.oldStart,hunk.oldCount)} → 修改后${hunkRange(hunk.newStart,hunk.newCount)}）。保留其他改动块和暂存区；不能通过 Unstage 恢复。`;$('gitPlanFiles').replaceChildren();$('gitDialogError').textContent='';$('gitConfirmOperation').disabled=false;$('gitDialog').showModal();
+ $('gitPlanText').textContent=`丢弃 ${context.path} 中选中的未暂存改动块（修改前${hunkRange(hunk.oldStart,hunk.oldCount)} → 修改后${hunkRange(hunk.newStart,hunk.newCount)}）。保留其他改动块和暂存区；不能通过 Unstage 恢复。`;$('gitPlanFiles').replaceChildren();$('gitDialogError').textContent='';$('gitConfirmOperation').disabled=false;$('gitDialog').showModal();
 }
 $('gitDialog').addEventListener('cancel',event=>{if(busy)event.preventDefault();});
 const submitRepositoryOperation=$('gitOperationForm').onsubmit;
