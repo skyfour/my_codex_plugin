@@ -13,3 +13,6 @@ credentials.json
 *.pem
 *.key
 *.log
+plugins/dbx/bin/
+plugins/dbx/assets/workbench.html
+plugins/dbx/.installed-release.json
