@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | [任务看板](plugins/codex-task-panel) | 0.4.4 | 打开任务看板 |
 | [API 调试台](plugins/codex-api-client) | 0.1.0 | 打开 API 调试台 |
-| [本地代码审查](plugins/codex-local-review) | 0.1.0 | 打开本地代码审查 |
+| [本地代码审查](plugins/codex-local-review) | 0.3.0 | 打开本地代码审查 |
 
 ## 在其他电脑安装
 
@@ -50,7 +50,7 @@ node scripts/install.mjs
 
 - 任务看板：`${CODEX_HOME:-~/.codex}/task-panel/`；`TASK_PANEL_HOME` 可自定义。每台电脑单独配置 TAPD，同一来源可重新导入；本地泳道和会话关联各自独立。
 - API 调试台：`~/Library/Application Support/Codex API Client`；`CODEX_API_CLIENT_DATA_DIR` 可自定义。集合、环境可用 Postman 导出/导入迁移；敏感值不随默认导出迁移，在新电脑重新填写。
-- 本地代码审查：`${CODEX_HOME:-~/.codex}/local-review/`；`LOCAL_REVIEW_HOME` 可自定义。保存人工评论、已审阅状态与代码快照，不依赖远程仓库或 AI。
+- 本地代码审查：`${CODEX_HOME:-~/.codex}/local-review/`；`LOCAL_REVIEW_HOME` 可自定义。保存最近项目、固定项目、人工评论、已审阅状态与代码快照，不依赖远程仓库或 AI。
 - 升级前可备份本地数据目录。不要将这些目录放进 Git，也不要并发使用云盘同步正在运行的 SQLite 文件。
 
 ## 开发与验证

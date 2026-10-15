@@ -11,13 +11,14 @@ async function disk(root,path,allowMissing=false){const full=bounded(root,path);
 async function revision(root,ref){if(!ref||ref.startsWith('-'))throw Error('请输入有效的本地提交或分支');return (await git(root,['rev-parse','--verify','--end-of-options',`${ref}^{commit}`])).trim();}
 async function indexBlob(root,path){const entries=(await git(root,['ls-files','--stage','-z','--',path])).split('\0').filter(Boolean).map(s=>{const i=s.indexOf('\t');return {header:s.slice(0,i).split(' '),path:s.slice(i+1)};}).filter(e=>e.path===path);if(!entries.length)return '';const entry=entries.find(e=>e.header[2]==='0');if(!entry)throw Error(`文件有未解决的合并冲突，请先解决或使用指定文件模式：${path}`);if(entry.header[0]==='160000')throw Error(`暂不支持子模块差异：${path}`);return git(root,['show',`:${path}`]);}
 async function blob(root,ref,path){const exists=await git(root,['ls-tree','-z',ref,'--',path]);if(!exists)return '';return git(root,['show',`${ref}:${path}`]);}
-export async function snapshot({project,mode='working',base='HEAD',target='HEAD',paths=[]}){
+async function plan({project,mode='working',base='HEAD',target='HEAD',paths=[]}){
  const root=await realpath(resolve(project));if(!(await stat(root)).isDirectory())throw Error('项目路径不是目录');
  let files=[],beforeRef=null,afterRef=null;
  if(mode==='files'){if(!paths.length)throw Error('请填写至少一个相对文件路径');files=[...new Set(paths)];}
  else{
   const top=(await git(root,['rev-parse','--show-toplevel'])).trim();if(await realpath(top)!==root)throw Error('请填写 Git 仓库根目录');
-  if(mode==='commits'){beforeRef=await revision(root,base);afterRef=await revision(root,target);files=(await git(root,['diff','--no-ext-diff','--no-textconv','--no-renames','--name-only','-z',beforeRef,afterRef,'--'])).split('\0').filter(Boolean);}
+  if(mode==='commit'){afterRef=await revision(root,target);const parents=(await git(root,['rev-list','--parents','-n','1',afterRef])).trim().split(' ');beforeRef=parents[1]??null;files=(await git(root,beforeRef?['diff','--no-ext-diff','--no-textconv','--no-renames','--name-only','-z',beforeRef,afterRef,'--']:['diff-tree','--root','--no-commit-id','--no-renames','--name-only','-z','-r',afterRef,'--'])).split('\0').filter(Boolean);}
+  else if(mode==='commits'){beforeRef=await revision(root,base);afterRef=await revision(root,target);files=(await git(root,['diff','--no-ext-diff','--no-textconv','--no-renames','--name-only','-z',beforeRef,afterRef,'--'])).split('\0').filter(Boolean);}
   else{
    try{beforeRef=await revision(root,'HEAD');}catch{if((await git(root,['rev-list','--all','--count'])).trim()!=='0')throw Error('无法读取 HEAD');}
    const args=['diff','--no-ext-diff','--no-textconv','--no-renames','--name-only','-z'];
@@ -28,7 +29,12 @@ export async function snapshot({project,mode='working',base='HEAD',target='HEAD'
    if(mode==='unstaged')beforeRef=':';
   }
  }
- files=[...new Set(files)];if(files.length>300)throw Error('超过 300 个文件，请缩小范围');
+ return {root,files:[...new Set(files)],beforeRef,afterRef,mode};
+}
+export async function listChanges(args){const p=await plan(args);return {project:p.root,mode:p.mode,base:p.beforeRef,target:p.afterRef,files:p.files.map(path=>({path}))};}
+export async function snapshot(args){
+ const prepared=await plan(args);const {root,beforeRef,afterRef,mode}=prepared;let {files}=prepared;if(args.selection){const available=new Set(files);if(args.selection.some(p=>!available.has(p)))throw Error('文件改动已变化，请刷新');files=args.selection;}
+ if(files.length>300)throw Error('超过 300 个文件，请缩小范围');
  const result=[];let size=0;
  for(const path of files){bounded(root,path);let before='';
   if(mode==='unstaged')before=await indexBlob(root,path);
@@ -44,7 +50,7 @@ export class ReviewStore{
  static async open(dir){await mkdir(dir,{recursive:true,mode:0o700});const file=join(dir,'reviews.sqlite');const store=new ReviewStore(file);await chmod(file,0o600);return store;}
  constructor(file){this.db=new DatabaseSync(file);this.db.exec('CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, data TEXT NOT NULL)');}
  close(){this.db.close();}
- list(){return this.db.prepare('SELECT data FROM reviews ORDER BY rowid DESC LIMIT 100').all().map(x=>{const r=JSON.parse(x.data);return {id:r.id,project:r.project,mode:r.mode,createdAt:r.createdAt,count:r.files.length,reviewed:r.files.filter(f=>f.reviewed).length};});}
+ list(project=null){const query=project?this.db.prepare("SELECT data FROM reviews WHERE json_extract(data,'$.project')=? ORDER BY rowid DESC LIMIT 100"):this.db.prepare('SELECT data FROM reviews ORDER BY rowid DESC LIMIT 100');return (project?query.all(project):query.all()).map(x=>{const r=JSON.parse(x.data);return {id:r.id,project:r.project,mode:r.mode,createdAt:r.createdAt,count:r.files.length,reviewed:r.files.filter(f=>f.reviewed).length};});}
  get(id){const row=this.db.prepare('SELECT data FROM reviews WHERE id=?').get(id);if(!row)throw Error('审查记录不存在');return JSON.parse(row.data);}
  add(r){this.db.prepare('INSERT INTO reviews VALUES (?,?)').run(r.id,JSON.stringify(r));return r;}
  update({id,version,path,reviewed,comment,deleteComment}){const r=this.get(id),old=JSON.stringify(r);if(r.version!==version)throw Error('记录已更新，请重新打开后再保存');const f=r.files.find(f=>f.path===path);if(!f)throw Error('文件不存在');if(reviewed!==undefined)f.reviewed=reviewed;

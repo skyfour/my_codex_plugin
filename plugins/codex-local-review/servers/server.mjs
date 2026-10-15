@@ -7,20 +7,37 @@ import {StdioServerTransport} from '@modelcontextprotocol/sdk/server/stdio.js';
 import {ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {registerAppResource,RESOURCE_MIME_TYPE} from '@modelcontextprotocol/ext-apps/server';
 import {z} from 'zod';
-import {snapshot,ReviewStore,markdown} from '../src/review.mjs';
-export const URI='ui://codex-local-review/v1.html';
-export function html(){return readFileSync(new URL('../ui/index.html',import.meta.url),'utf8').replace('<!-- SCRIPT -->',`<script type="module">${readFileSync(new URL('../ui/app.mjs',import.meta.url),'utf8').replaceAll('</script','<\\/script')}</script>`);}
-export async function createServer({dir=process.env.LOCAL_REVIEW_HOME??join(process.env.CODEX_HOME??join(homedir(),'.codex'),'local-review')}={}){
- const store=await ReviewStore.open(dir),server=new McpServer({name:'codex-local-review',version:'0.1.0'}),definitions=[],actions=new Map();
+import {snapshot,listChanges,ReviewStore,markdown} from '../src/review.mjs';
+import {Projects,browseFolders,discoverProjects,pickFolders,projectFiles,gitRead} from '../src/projects.mjs';
+import {createHash} from 'node:crypto';
+const digest=f=>createHash('sha256').update(JSON.stringify([f.path,f.before,f.after])).digest('hex');
+export const VERSION='0.3.0';
+export const URI=`ui://codex-local-review/${VERSION}/workbench.html`;
+export function html(){const safe=s=>s.replaceAll('</script','<\\/script');const libraries=['diff/dist/diff.js','@highlightjs/cdn-assets/highlight.min.js'].map(p=>`<script>${safe(readFileSync(new URL('../node_modules/'+p,import.meta.url),'utf8'))}</script>`).join('');return readFileSync(new URL('../ui/index.html',import.meta.url),'utf8').replace('<!-- STYLES -->',()=>`<style>${readFileSync(new URL('../ui/styles.css',import.meta.url),'utf8')}</style>`).replace('<!-- SCRIPT -->',()=>libraries+`<script type="module">${(readFileSync(new URL('../ui/diff.mjs',import.meta.url),'utf8').replaceAll('export function','function')+'\n'+readFileSync(new URL('../ui/app.mjs',import.meta.url),'utf8')).replaceAll('</script','<\\/script')}</script>`);}
+export async function createServer({picker=pickFolders,dir=process.env.LOCAL_REVIEW_HOME??join(process.env.CODEX_HOME??join(homedir(),'.codex'),'local-review')}={}){
+ const store=await ReviewStore.open(dir),server=new McpServer({name:'codex-local-review',version:VERSION}),definitions=[],actions=new Map(),projects=new Projects(store);
+ const workspace=()=>{const items=projects.list(),activeProject=projects.preference('activeProject'),active=items.find(p=>p.id===activeProject);return {version:VERSION,projects:items,activeProject,reviews:store.list(active?.path)};};
  const register=(name,schema,fn,{open=false,write=false}={})=>{const config={title:open?'本地代码审查':name,description:open?'打开本地人工代码审查面板，无需远程仓库或 AI。':name,inputSchema:schema,annotations:{readOnlyHint:!write,destructiveHint:false,openWorldHint:false},_meta:open?{ui:{resourceUri:URI},'openai/ui':{entrypoints:[{type:'global'}]}}:{ui:{visibility:['app']}},...(open?{icons:[{src:`data:image/svg+xml;base64,${readFileSync(new URL('../assets/icon-sidebar.svg',import.meta.url)).toString('base64')}`,mimeType:'image/svg+xml',sizes:['any']}]}:{})};
  const call=async args=>{try{return {content:[{type:'text',text:'操作完成'}],structuredContent:await fn(schema.parse(args))};}catch(e){return {isError:true,content:[{type:'text',text:e instanceof z.ZodError?'输入参数无效':e.message}],structuredContent:{error:true}};}};actions.set(name,call);server.registerTool(name,config,call);definitions.push({name,...config,inputSchema:z.toJSONSchema(schema,{target:'draft-7'})});};
  const id=z.string().uuid(),empty=z.object({}).strict();
- register('review_open',empty,()=>({reviews:store.list()}),{open:true});
- register('review_create',z.object({project:z.string().min(1).max(4096),mode:z.enum(['working','staged','unstaged','commits','files']),base:z.string().max(512).optional(),target:z.string().max(512).optional(),paths:z.array(z.string().min(1).max(4096)).max(300).optional()}).strict(),async args=>({review:store.add(await snapshot(args))}),{write:true});
+ register('review_open',empty,workspace,{open:true});
+ const scope={mode:z.enum(['working','staged','unstaged','commit','commits','files']),base:z.string().max(512).optional(),target:z.string().max(512).optional(),paths:z.array(z.string().min(1).max(4096)).max(300).optional()};
+ register('review_create',z.object({project:z.string().min(1).max(4096),...scope,expected:z.object({path:z.string(),digest:z.string().regex(/^[a-f0-9]{64}$/)}).optional()}).strict(),async args=>{const r=await snapshot(args);if(args.expected){const f=r.files.find(f=>f.path===args.expected.path);if(!f||digest(f)!==args.expected.digest)throw Error('文件在查看后发生了变化，请刷新后再保存审查');}store.add(r);const p=projects.byPath(r.project);if(p)projects.update(p.id,{state:{lastReview:r.id}});return {review:r};},{write:true});
+ register('project_open',z.object({path:z.string().min(1).max(4096).optional(),id:id.optional()}).strict().refine(a=>a.path||a.id),async args=>{const p=await projects.open(args.path??projects.get(args.id).path);return {project:p,repository:await projects.inspect(p),...workspace()};},{write:true});
+ register('project_pick',empty,async()=>{const selected=await picker();for(const path of selected.slice(0,100))await projects.open(path);return {...workspace(),canceled:selected.length===0};},{write:true});
+ register('project_add_many',z.object({paths:z.array(z.string().min(1).max(4096)).min(1).max(100)}).strict(),async({paths})=>{for(const path of paths)await projects.open(path);return workspace();},{write:true});
+ register('project_update',z.object({id,pinned:z.boolean().optional(),state:z.object({mode:scope.mode.optional(),base:z.string().max(512).optional(),target:z.string().max(512).optional(),file:z.string().max(4096).optional(),lastReview:id.nullable().optional()}).strict().optional()}).strict(),({id,...patch})=>{projects.update(id,patch);return workspace();},{write:true});
+ register('project_close',z.object({id}).strict(),({id})=>{projects.closeProject(id);return workspace();},{write:true});
+ register('project_forget',z.object({id}).strict(),({id})=>{projects.forget(id);return workspace();},{write:true});
+ register('folder_browse',z.object({path:z.string().max(4096).optional()}).strict(),args=>browseFolders(args.path));
+ register('project_discover',z.object({path:z.string().min(1).max(4096)}).strict(),args=>discoverProjects(args.path));
+ register('project_files',z.object({id,directory:z.string().max(4096).optional()}).strict(),({id,directory})=>projectFiles(projects.get(id),directory));
+ register('project_changes',z.object({id,...scope}).strict(),async({id,...args})=>{const p=projects.get(id),result=await listChanges({project:p.path,...args});let statuses=new Map();if(p.isGit&&!['commit','commits'].includes(args.mode)){const raw=await gitRead(p.path,['status','--porcelain=v1','-z','--no-renames','--untracked-files=all']);statuses=new Map(raw.split('\0').filter(Boolean).map(s=>[s.slice(3),s.slice(0,2)]));}return {...result,files:result.files.map(f=>({...f,status:statuses.get(f.path)??'M'}))};});
+ register('project_file',z.object({id,path:z.string().min(1).max(4096),...scope}).strict(),async({id,path,...args})=>{const p=projects.get(id);const r=await snapshot({project:p.path,...args,...(args.mode==='files'?{paths:[path]}:{selection:[path]})});const file=r.files[0];return {file:{...file,digest:digest(file)}};});
  register('review_get',z.object({id}).strict(),({id})=>({review:store.get(id)}));
  register('review_update',z.object({id,version:z.number().int().positive(),path:z.string(),reviewed:z.boolean().optional(),deleteComment:id.optional(),comment:z.object({side:z.enum(['before','after']),line:z.number().int().positive(),severity:z.enum(['note','issue','blocking']),text:z.string().min(1).max(10000)}).strict().optional()}).strict(),args=>({review:store.update(args)}),{write:true});
  register('review_export',z.object({id}).strict(),({id})=>{const r=store.get(id);return {markdown:markdown(r),json:JSON.stringify(r,null,2)};});
  registerAppResource(server,'本地代码审查',URI,{},async()=>({contents:[{uri:URI,mimeType:RESOURCE_MIME_TYPE,text:html(),_meta:{ui:{prefersBorder:false}}}]}));
- server.server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:definitions}));return {server,store,actions};
+ server.server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:definitions}));return {server,store,actions,projects};
 }
 if(process.argv[1]&&realpathSync(process.argv[1])===realpathSync(fileURLToPath(import.meta.url))){const {server,store}=await createServer();await server.connect(new StdioServerTransport());for(const sig of ['SIGINT','SIGTERM'])process.on(sig,()=>void server.close().finally(()=>{store.close();process.exit(0);}));}
