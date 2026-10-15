@@ -12,6 +12,6 @@
     "test": "npm run validate && npm --prefix plugins/codex-task-panel test && npm --prefix plugins/codex-api-client test && npm --prefix plugins/codex-local-review test",
     "check": "npm --prefix plugins/codex-api-client run check && npm --prefix plugins/codex-local-review run check",
     "test:task-panel-ui": "node scripts/check-task-panel-navigation.mjs && node scripts/check-task-panel-credentials.mjs && node --experimental-sqlite scripts/check-task-panel-inputs.mjs",
-    "test:local-review-ui": "node --experimental-sqlite scripts/check-local-review-ui.mjs"
+    "test:local-review-ui": "node --experimental-sqlite scripts/check-local-review-ui.mjs && node --experimental-sqlite scripts/check-local-review-layout.mjs"
   }
 }

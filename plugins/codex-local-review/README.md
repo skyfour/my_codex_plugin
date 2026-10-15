@@ -1,4 +1,4 @@
-# 本地代码审查 0.3
+# 本地代码审查 0.3.1
 
 在 Codex 侧栏打开“本地代码审查”，或输入“打开本地代码审查”。参考 Sublime Merge 的仓库浏览与差异审阅流程，提供本地人工 Review，无需远程仓库。
 
@@ -32,3 +32,5 @@
 在仓库根目录执行 `node scripts/install.mjs` 安装/升级。验证：`npm test`、`npm run check`、`npm run test:local-review-ui`（需要 Chrome）。
 
 参考：[Sublime Merge 官方入门文档](https://www.sublimemerge.com/docs/getting_started)、[差异上下文](https://www.sublimemerge.com/docs/diff_context)。
+
+0.3.1 合并顶部项目工具栏，统一深浅主题与控件样式；项目、分支及文件名保持单行省略，悬停显示全文。干净工作区隐藏无效差异工具栏，并提供浏览提交历史和刷新入口。
