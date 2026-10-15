@@ -4,9 +4,9 @@
 
 | 插件 | 版本 | 打开方式 |
 | --- | --- | --- |
-| [任务看板](plugins/codex-task-panel) | 0.4.4 | 打开任务看板 |
+| [任务看板](plugins/codex-task-panel) | 0.4.5 | 打开任务看板 |
 | [API 调试台](plugins/codex-api-client) | 0.1.0 | 打开 API 调试台 |
-| [本地代码审查](plugins/codex-local-review) | 0.4.0 | 打开本地代码审查 |
+| [本地代码审查](plugins/codex-local-review) | 0.4.1 | 打开本地代码审查 |
 
 ## 在其他电脑安装
 
