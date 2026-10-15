@@ -77,6 +77,8 @@ npm run test:task-panel-ui
 npm run test:local-review-ui
 ```
 
+本地代码审查 UI 测试的截图默认写入仓库内的 `test-results/local-review/`，目录自动创建且不会提交到 Git；不依赖作者机器的路径或启动命令所在目录。可用 `CODEX_UI_SCREENSHOT_DIR=./test-results/custom npm run test:local-review-ui` 指定其他输出位置，相对目录按当前工作目录解析。
+
 `test:task-panel-ui` 需要 Chrome，模拟原生宿主无响应时打开导入页、查询错误恢复，以及宿主推送期间的全输入控件焦点与草稿保留。
 
 `prepare:plugins` 不修改 Codex 配置，适用于准备源码和 CI。任务面板直接运行源码；API 界面构建产物位于其 `dist/index.html`，不提交到 Git。
