@@ -1,92 +1,177 @@
-# 我的 Codex 插件
+# Codex 插件集
 
-个人 Codex 插件统一源码与安装仓库。后续自用插件继续收录到这里。
+在 Codex 侧栏里管理任务、调试接口、审阅代码和操作数据库。
 
-| 插件 | 版本 | 打开方式 |
+通过 GitHub 分发，使用同一套脚本安装与更新。日常使用由 Codex 启动所需服务；DBX 也无需另外启动桌面应用。
+
+[快速开始](#快速开始) · [使用指南](#开始使用) · [更新插件](#更新插件) · [常见问题](#常见问题) · [开发与维护](#开发与维护)
+
+## 插件一览
+
+| 插件 | 可以做什么 | 当前版本 |
 | --- | --- | --- |
-| [任务看板](plugins/codex-task-panel) | 0.4.7 | 打开任务看板 |
-| [API 调试台](plugins/codex-api-client) | 0.1.1 | 打开 API 调试台 |
-| [本地代码审查](plugins/codex-local-review) | 0.5.1 | 打开本地代码审查 |
-| [DBX 数据库工作台](plugins/dbx) | 0.6.39 | 点击 Codex 左侧 DBX 图标 |
+| [任务看板](plugins/codex-task-panel/README.md) | 从 TAPD 选择导入任务，安排泳道进度，关联 Codex 会话 | 0.4.7 |
+| [API 调试台](plugins/codex-api-client/README.md) | 管理 HTTP 请求、集合与环境，导入 Postman / cURL，执行脚本与断言 | 0.1.1 |
+| [本地代码审查](plugins/codex-local-review/README.md) | 浏览差异、添加审阅评论，以及暂存、提交、拉取和推送 Git 改动 | 0.5.1 |
+| [DBX 数据库工作台](plugins/dbx/README.md) | 在 Codex 内使用 DBX 工作台，管理连接、查询数据库 | 0.6.39 |
 
-## 在其他电脑安装
+## 快速开始
 
-当前完整支持 **macOS**（API 调试台敏感值依赖系统钥匙串）。先安装 Git、Node.js >=22.13（建议 Node 24 LTS）、Codex 桌面版及支持 `codex plugin` 的 CLI，并完成 Codex 登录。`node` 和 `codex` 需要在桌面应用的 PATH 中可用。
+### 安装前准备
+
+- **macOS**：当前安装脚本仅支持 macOS；DBX 发布包另要求 **Apple Silicon（M 系列芯片）**。
+- **Node.js ≥ 22.13**：建议 Node 24 LTS，需包含 npm。
+- **Git**，以及已登录的 **Codex 桌面版与 CLI**。CLI 需支持 `codex plugin`；任务看板的会话功能还需支持 `codex app-server --stdio`。
+
+`node` 和 `codex` 需能被 Codex 桌面应用找到。可先在终端检查：
 
 ```sh
-git clone git@github.com:skyfour/my_codex_plugin.git
+node --version
+codex plugin --help
+```
+
+### 1. 获取仓库
+
+在准备存放插件源码的位置执行：
+
+```sh
+git clone https://github.com/skyfour/my_codex_plugin.git
 cd my_codex_plugin
+```
+
+### 2. 安装插件
+
+安装任务看板、API 调试台和本地代码审查：
+
+```sh
 node scripts/install.mjs
 ```
 
-未配置 GitHub SSH 时，克隆可改用 `git clone https://github.com/skyfour/my_codex_plugin.git`。
+脚本会安装锁定依赖、构建 API 界面、检查插件配置与 MCP 入口，再注册 `my-codex-plugins` 插件市场并安装这三个插件。**默认不安装 DBX。**
 
-安装脚本自动安装锁文件中的依赖、构建 API 界面、检查插件 MCP，然后注册 `my-codex-plugins` 本地市场并安装原有三个插件。每台电脑只需运行一次；完成后重新打开 Codex 并新建聊天，在插件设置中确认启用，再输入上表的打开方式。正常使用无需手动启动后台服务。
+只想安装其中一个时，选择对应命令：
 
-DBX 按需安装，目前提供 **macOS Apple Silicon** 包：
+| 插件 | 安装命令 |
+| --- | --- |
+| 任务看板 | `node scripts/install.mjs --plugin codex-task-panel` |
+| API 调试台 | `node scripts/install.mjs --plugin codex-api-client` |
+| 本地代码审查 | `node scripts/install.mjs --plugin codex-local-review` |
+| DBX | `node scripts/install.mjs --plugin dbx` |
 
-```sh
-node scripts/install.mjs --plugin dbx
-```
+安装 DBX 时，脚本会从本仓库的 [GitHub Releases](https://github.com/skyfour/my_codex_plugin/releases) 下载对应原生程序并校验 SHA-256，无需安装 Rust 或自行编译。平台与发布方式见 [DBX 说明](plugins/dbx/README.md)。
 
-安装器自动从[本仓库的 DBX Release](https://github.com/skyfour/my_codex_plugin/releases/tag/dbx-v0.6.39)下载原生程序、校验 SHA-256 并安装插件。首次使用时在左侧 DBX 界面设置密码、完成迁移并添加连接，无需启动 DBX 桌面应用。也可以用 `--plugin codex-task-panel` 等名称只准备和安装一个插件。
+### 3. 在 Codex 中打开
 
-**请保留克隆目录**，用于后续更新。仓库分发源码，Git 直接注册不会自动安装 npm 依赖；请使用上述流程，不要只执行 `codex plugin marketplace add skyfour/my_codex_plugin`。
+安装完成后，重新打开 Codex 并新建聊天，在插件设置中确认插件已启用，然后点击左侧对应图标。
 
-如果已安装旧市场 `task-panel-local` 或 `codex-api-client-local` 中的插件，在 Codex 插件设置中停用旧实例，避免出现重复入口；确认新实例正常后再卸载旧实例。安装脚本不删除旧插件或本地数据。
+任务看板、API 调试台和本地代码审查也可以在聊天中输入「打开任务看板」「打开 API 调试台」或「打开本地代码审查」。DBX 直接点击左侧 DBX 图标。
 
-如果这台电脑已安装 `dbx@dbx-local`，先按上面的命令安装 `dbx@my-codex-plugins` 并确认左侧 DBX 能打开，再执行 `codex plugin remove dbx@dbx-local`，避免出现两个 DBX 入口。旧市场和数据库数据目录不会被安装脚本自动删除。
+> 请保留克隆目录，后续更新仍使用它。当前安装流程是「克隆 GitHub 仓库 → 运行安装脚本」；只添加远程插件市场不会准备 npm 依赖、API 界面和 DBX 原生程序。
+
+## 开始使用
+
+| 插件 | 第一次打开后 |
+| --- | --- |
+| 任务看板 | 在「设置 → 数据源」填写 TAPD 工作空间 ID、账户完整姓名，在「本地凭据」保存 Access Token。之后从「导入任务」查询、勾选并确认。 |
+| API 调试台 | 新建请求，或导入已有的 Postman 集合、环境和 cURL。密码、Token 等值请标记为敏感，通过变量引用。 |
+| 本地代码审查 | 点击「打开项目…」选择本地项目，浏览工作区差异或提交历史，添加评论并保存审查记录。 |
+| DBX | 在工作台设置密码、按提示完成迁移，再添加数据库连接。 |
+
+任务看板保存配置不会自动导入任务，也不会向 TAPD 回写状态。API 调试台的请求从本机发出，支持 localhost 和内网。
+
+代码审查可独立使用；如需在提交时关联 TAPD 任务，还需安装并配置任务看板。统一安装脚本会自动登记任务看板的本机联动接口。详见[任务提交联动](docs/task-commit-context.md)。
 
 ## 更新插件
 
+进入首次克隆的仓库目录，获取最新源码：
+
 ```sh
-cd my_codex_plugin
 git pull --ff-only
-node scripts/install.mjs
 ```
 
-随后重新打开 Codex 并新建聊天。注册的是本地目录，因此更新使用 `git pull`，无需 `marketplace upgrade`。
+然后按需要更新的范围，运行对应安装命令：
 
-更新 DBX 时，在同一克隆目录执行 `git pull --ff-only`，再运行 `node scripts/install.mjs --plugin dbx`。`plugins/dbx/release.json` 固定发布版本与校验值；版本未变化时安装器跳过下载。原生程序放在 Git 忽略目录，数据库配置和数据仍在各机器的 DBX 数据目录，不会被更新脚本删除。新版本如何发布见 [DBX 维护说明](plugins/dbx/README.md)。
+| 更新范围 | 命令 |
+| --- | --- |
+| 任务看板、API 调试台、本地代码审查 | `node scripts/install.mjs` |
+| 单个插件 | 使用[安装命令表](#2-安装插件)中对应的 `--plugin` 命令 |
+| DBX | `node scripts/install.mjs --plugin dbx` |
 
-## 配置任务看板
+完成后重新打开 Codex 并新建聊天。**只执行 `git pull` 不会更新已安装的插件**，还需要重新运行安装脚本。本仓库注册的是本地目录，更新不使用 `marketplace upgrade`。
 
-直接打开看板的「设置 → 数据源」，填写并保存 TAPD 工作空间 ID、账户完整姓名，再在「本地凭据」输入 Access Token 并点击「保存凭据」。令牌输入隐藏，保存后清空输入框，只在本机以 0600 权限保存，不返回到聊天。
+更新保留各插件已有的本地数据。DBX 的版本与校验值由 `plugins/dbx/release.json` 固定；版本未变化时会跳过原生程序下载。
 
-保存凭据后即可通过「导入任务」查询、勾选并确认。保存配置不会自动导入，也不会发起 TAPD 请求。
+## 数据与迁移
 
-终端备用方式：在 `plugins/codex-task-panel` 中执行 `npm run configure`。即使设置了 `TAPD_ACCESS_TOKEN`，也能直接输入并保存新令牌，保存后本地令牌立即优先生效，无需移除环境变量。旧配置在重新保存前保持原优先级。
+插件工作数据保存在本机，安装和更新不会自动跨设备同步任务、会话、请求集合、环境或凭据。新设备按[快速开始](#快速开始)安装，再配置各插件。
 
-## 多电脑数据边界
+- **任务看板**：每台设备单独配置 TAPD，可从相同来源重新导入任务；本地泳道和 Codex 会话关联各自独立。
+- **API 调试台**：集合与环境可用 Postman 导出 / 导入迁移；敏感变量和 Cookie 值保存在 macOS 钥匙串，新设备需要重新配置。
+- **本地代码审查与 DBX**：审查记录、数据库连接配置和历史保留在各自的本地数据目录。
 
-此仓库统一安装与升级程序，**不会自动同步任务、会话、接口集合、环境或凭据**。
+<details>
+<summary>查看默认数据目录与自定义方式</summary>
 
-- 任务看板：`${CODEX_HOME:-~/.codex}/task-panel/`；`TASK_PANEL_HOME` 可自定义。每台电脑单独配置 TAPD，同一来源可重新导入；本地泳道和会话关联各自独立。
-- API 调试台：`~/Library/Application Support/Codex API Client`；`CODEX_API_CLIENT_DATA_DIR` 可自定义。集合、环境可用 Postman 导出/导入迁移；敏感值不随默认导出迁移，在新电脑重新填写。
-- 本地代码审查：`${CODEX_HOME:-~/.codex}/local-review/`；`LOCAL_REVIEW_HOME` 可自定义。保存最近项目、固定项目、人工评论、已审阅状态与代码快照，不依赖远程仓库或 AI。
-- DBX：`~/Library/Application Support/com.dbx.codex`；`DBX_CODEX_DATA_DIR` 可自定义。连接、密码和历史只留在本机。
-- 升级前可备份本地数据目录。不要将这些目录放进 Git，也不要并发使用云盘同步正在运行的 SQLite 文件。
+| 插件 | 默认目录 | 自定义环境变量 |
+| --- | --- | --- |
+| 任务看板 | `${CODEX_HOME:-~/.codex}/task-panel/` | `TASK_PANEL_HOME` |
+| API 调试台 | `~/Library/Application Support/Codex API Client` | `CODEX_API_CLIENT_DATA_DIR` |
+| 本地代码审查 | `${CODEX_HOME:-~/.codex}/local-review/` | `LOCAL_REVIEW_HOME` |
+| DBX | `~/Library/Application Support/com.dbx.codex` | `DBX_CODEX_DATA_DIR` |
 
-## 开发与验证
+配置工具与 Codex 应使用相同的环境变量。任务看板的 TAPD 凭据保存在其本机目录中的 `credentials.json`，权限为 `0600`，不会返回到聊天。
+
+备份或迁移本地数据库前先停止对应服务；不要把数据、凭据放进 Git，也不要通过云盘并发同步运行中的 SQLite 文件。
+
+</details>
+
+## 常见问题
+
+### 为什么不能只在 Codex 中添加 GitHub 仓库？
+
+本仓库中的 Node 插件需要安装依赖，API 调试台需要构建界面，DBX 需要下载原生程序。安装脚本负责这些步骤，并将准备好的插件注册到 Codex。完整流程见[快速开始](#快速开始)。
+
+### 安装后没有侧栏入口，或仍显示旧界面？
+
+先确认脚本执行成功、插件已在 Codex 设置中启用，再重新打开 Codex 并新建聊天，让插件连接重新加载。若终端能运行 `node` 和 `codex`，桌面应用却提示找不到命令，请检查桌面应用继承的 PATH。
+
+### 已安装过旧版独立插件，如何避免重复入口？
+
+先安装本仓库中的插件并确认可用，再在 Codex 插件设置中停用、卸载旧实例，例如来自 `task-panel-local` 或 `codex-api-client-local` 市场的插件。安装脚本不会自动删除旧插件或数据。
+
+旧 DBX 实例 `dbx@dbx-local` 可在确认新实例 `dbx@my-codex-plugins` 正常后移除：
 
 ```sh
-npm run prepare:plugins
-npm test
-npm run check
-npm run test:task-panel-ui
-npm run test:local-review-ui
+codex plugin remove dbx@dbx-local
 ```
 
-本地代码审查 UI 测试的截图默认写入仓库内的 `test-results/local-review/`，目录自动创建且不会提交到 Git；不依赖作者机器的路径或启动命令所在目录。可用 `CODEX_UI_SCREENSHOT_DIR=./test-results/custom npm run test:local-review-ui` 指定其他输出位置，相对目录按当前工作目录解析。
+### 支持 Windows 或 Linux 吗？
 
-`test:task-panel-ui` 需要 Chrome，模拟原生宿主无响应时打开导入页、查询错误恢复，以及宿主推送期间的全输入控件焦点与草稿保留。
+当前完整安装仅支持 macOS。API 调试台的敏感值依赖 macOS 钥匙串，DBX 目前只发布 macOS Apple Silicon 包。
 
-`prepare:plugins` 不修改 Codex 配置，适用于准备源码和 CI。任务面板直接运行源码；API 界面构建产物位于其 `dist/index.html`，不提交到 Git。
+## 开发与维护
 
-一般插件放在 `plugins/<name>/`，包含 `.codex-plugin/plugin.json`、`.mcp.json`、skills、源码和锁文件，然后加入 `.agents/plugins/marketplace.json`；如有专门构建步骤，同时更新安装脚本。DBX 是原生发布包，使用 `plugins/dbx/release.json` 固定版本和 SHA-256，由安装器自动获取。
+在仓库根目录执行：
 
-市场结构参考 [OpenAI 官方插件打包文档](https://developers.openai.com/plugins/build/plugins#marketplace-metadata)。
+| 命令 | 用途 |
+| --- | --- |
+| `npm run prepare:plugins` | 安装三个 Node 插件的锁定依赖、构建 API 界面、检查插件配置与 MCP 入口；不修改 Codex 安装配置 |
+| `npm run validate` | 检查插件市场、版本、MCP 入口与发布包信息 |
+| `npm test` | 运行结构验证和现有 Node 测试 |
+| `npm run check` | 检查 API 调试台与代码审查的真实 stdio MCP 连接和内联界面 |
+| `npm run test:ui` | 运行三个 Node 插件的完整浏览器测试，需要 Chrome |
 
-任务看板与代码审查通过[提交上下文接口](docs/task-commit-context.md)联动。安装器会将已安装看板的接口登记到本机 `${CODEX_HOME:-~/.codex}/integrations/task-commit-context-v1.json`；其中只有协议版本和入口路径，不包含凭据或任务数据。两插件更新后重开 Codex 即可使用。
+<details>
+<summary>目录约定与单独验证</summary>
 
-代码审查的审阅流程见 [Summary 与文件标签](docs/review-surface.md) 和 [Git 工作台操作](docs/git-workbench.md)；三个插件的界面验证记录见[界面与操作复核](docs/ui-review-2026-10-15.md)。
+新增插件放入 `plugins/<name>/`，包含 `.codex-plugin/plugin.json`、`.mcp.json`、skills、源码和锁文件，并注册到 `.agents/plugins/marketplace.json`。有构建步骤时同时更新安装脚本。
+
+任务看板直接运行源码；API 界面构建产物在其 `dist/index.html`；DBX 原生程序和工作台由安装器下载。这些构建产物及 `node_modules` 不提交到 Git。DBX 的打包、校验与发布顺序见 [DBX 维护说明](plugins/dbx/README.md)。
+
+可单独运行 `npm run test:api-ui`、`npm run test:task-panel-ui` 或 `npm run test:local-review-ui`。代码审查 UI 截图默认写入仓库的 `test-results/local-review/`，可通过 `CODEX_UI_SCREENSHOT_DIR` 指定其他目录；相对路径按当前工作目录解析。控件审计截图与 JSON 默认在 `/tmp/codex-plugin-ui-audit`，可通过 `UI_AUDIT_DIR` 修改。
+
+</details>
+
+更多说明：[Summary 与文件标签](docs/review-surface.md) · [Git 工作台](docs/git-workbench.md) · [界面验证记录](docs/ui-review-2026-10-15.md) · [维护约定](AGENTS.md) · [更新记录](CHANGELOG.md) · [GitHub Releases](https://github.com/skyfour/my_codex_plugin/releases)
+
+插件市场结构参考 [OpenAI 官方插件打包文档](https://developers.openai.com/plugins/build/plugins#marketplace-metadata)。
