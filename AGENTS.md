@@ -1,16 +1,17 @@
 # 个人 Codex 插件仓库
 
-此仓库集中维护用户自用的 Codex 插件。后续新增个人插件默认放入 `plugins/<插件名>/`，并注册到 `.agents/plugins/marketplace.json`，沿用统一安装入口。
+此仓库集中维护用户自用的 Codex 插件。后续新增个人插件默认放入 `plugins/<插件名>/`，并注册到 `.agents/plugins/marketplace.json`；每个插件提供独立的 `install.mjs` 入口，以及根目录的 `install:<简称>` npm 命令。
 
 - 优先中文沟通与文档。
 - 仅提交源码、资源、锁文件、测试和安装说明；禁止上传数据库、令牌、凭据、个人任务、真实接口环境、机器配置或 node_modules。
 - 插件名及市场名是稳定安装标识，不随意更改。
-- 安装和更新通过 `node scripts/install.mjs` 完成，保留已有本地数据。
+- 安装和更新按插件分别执行 `npm run install:task-panel`、`npm run install:api-client`、`npm run install:local-review` 或 `npm run install:dbx`，保留已有本地数据；不默认安装任何插件。
+- 根安装器 `node scripts/install.mjs` 无参数只显示帮助；批量安装必须显式重复 `--plugin <插件名>`，单个 `--plugin` 保持兼容。`--prepare` 也必须明确指定插件。
 - 当前完整支持 macOS；API Client 使用系统 Keychain，不将其改成明文存储以迁就其他系统。
 
 ## Testing
 
-- `npm run prepare:plugins`：安装锁定依赖、构建 API 界面并验证 MCP，不注册插件。
+- `npm run prepare:plugins`：仅用于开发，明确准备三个 Node 插件的锁定依赖、构建 API 界面并验证 MCP，不注册插件。新增插件不自动加入此范围。
 - `npm test`：验证市场结构、版本与全部现有 Node 测试。
 - `npm run check`：API Client 的真实 stdio MCP 连接及内联 UI 检查。
 - API 浏览器测试：在 `plugins/codex-api-client` 执行 `npm exec playwright -- test --config playwright.tree.config.ts`，需要 Chrome。

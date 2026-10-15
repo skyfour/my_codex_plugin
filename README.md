@@ -2,7 +2,7 @@
 
 在 Codex 侧栏里管理任务、调试接口、审阅代码和操作数据库。
 
-通过 GitHub 分发，使用同一套脚本安装与更新。日常使用由 Codex 启动所需服务；DBX 也无需另外启动桌面应用。
+通过 GitHub 分发，每个插件独立安装与更新，需要哪几个就安装哪几个。日常使用由 Codex 启动所需服务；DBX 也无需另外启动桌面应用。
 
 [快速开始](#快速开始) · [使用指南](#开始使用) · [更新插件](#更新插件) · [常见问题](#常见问题) · [开发与维护](#开发与维护)
 
@@ -41,24 +41,38 @@ cd my_codex_plugin
 
 ### 2. 安装插件
 
-安装任务看板、API 调试台和本地代码审查：
-
-```sh
-node scripts/install.mjs
-```
-
-脚本会安装锁定依赖、构建 API 界面、检查插件配置与 MCP 入口，再注册 `my-codex-plugins` 插件市场并安装这三个插件。**默认不安装 DBX。**
-
-只想安装其中一个时，选择对应命令：
+选择需要的插件，在仓库根目录执行对应命令：
 
 | 插件 | 安装命令 |
 | --- | --- |
-| 任务看板 | `node scripts/install.mjs --plugin codex-task-panel` |
-| API 调试台 | `node scripts/install.mjs --plugin codex-api-client` |
-| 本地代码审查 | `node scripts/install.mjs --plugin codex-local-review` |
-| DBX | `node scripts/install.mjs --plugin dbx` |
+| 任务看板 | `npm run install:task-panel` |
+| API 调试台 | `npm run install:api-client` |
+| 本地代码审查 | `npm run install:local-review` |
+| DBX | `npm run install:dbx` |
+
+例如，只安装任务看板和本地代码审查：
+
+```sh
+npm run install:task-panel
+npm run install:local-review
+```
+
+每个命令对应 `plugins/<插件名>/install.mjs`，只准备并安装该插件：按需安装依赖或下载原生程序、执行所需构建，再注册到 `my-codex-plugins` 插件市场。**没有默认安装的插件。**
 
 安装 DBX 时，脚本会从本仓库的 [GitHub Releases](https://github.com/skyfour/my_codex_plugin/releases) 下载对应原生程序并校验 SHA-256，无需安装 Rust 或自行编译。平台与发布方式见 [DBX 说明](plugins/dbx/README.md)。
+
+<details>
+<summary>高级：一次指定多个插件</summary>
+
+也可以明确列出本次需要安装的插件：
+
+```sh
+node scripts/install.mjs --plugin codex-task-panel --plugin codex-local-review
+```
+
+`--plugin` 可重复使用。单个 `--plugin` 命令仍可使用；不带参数运行 `node scripts/install.mjs` 只显示帮助，不安装任何插件。
+
+</details>
 
 ### 3. 在 Codex 中打开
 
@@ -79,7 +93,7 @@ node scripts/install.mjs
 
 任务看板保存配置不会自动导入任务，也不会向 TAPD 回写状态。API 调试台的请求从本机发出，支持 localhost 和内网。
 
-代码审查可独立使用；如需在提交时关联 TAPD 任务，还需安装并配置任务看板。统一安装脚本会自动登记任务看板的本机联动接口。详见[任务提交联动](docs/task-commit-context.md)。
+代码审查可独立使用；如需在提交时关联 TAPD 任务，还需安装并配置任务看板。安装任务看板时会自动登记其本机联动接口。详见[任务提交联动](docs/task-commit-context.md)。
 
 ## 更新插件
 
@@ -89,13 +103,14 @@ node scripts/install.mjs
 git pull --ff-only
 ```
 
-然后按需要更新的范围，运行对应安装命令：
+再执行需要更新的插件各自的安装命令。例如，只更新任务看板和本地代码审查：
 
-| 更新范围 | 命令 |
-| --- | --- |
-| 任务看板、API 调试台、本地代码审查 | `node scripts/install.mjs` |
-| 单个插件 | 使用[安装命令表](#2-安装插件)中对应的 `--plugin` 命令 |
-| DBX | `node scripts/install.mjs --plugin dbx` |
+```sh
+npm run install:task-panel
+npm run install:local-review
+```
+
+其他插件使用[安装命令表](#2-安装插件)中的对应命令；DBX 单独执行 `npm run install:dbx`。每个命令只更新指定插件，不安装或更新其他插件。
 
 完成后重新打开 Codex 并新建聊天。**只执行 `git pull` 不会更新已安装的插件**，还需要重新运行安装脚本。本仓库注册的是本地目录，更新不使用 `marketplace upgrade`。
 
@@ -155,7 +170,7 @@ codex plugin remove dbx@dbx-local
 
 | 命令 | 用途 |
 | --- | --- |
-| `npm run prepare:plugins` | 安装三个 Node 插件的锁定依赖、构建 API 界面、检查插件配置与 MCP 入口；不修改 Codex 安装配置 |
+| `npm run prepare:plugins` | 仅供开发：明确准备三个 Node 插件的锁定依赖、构建 API 界面、检查插件配置与 MCP 入口；不修改 Codex 安装配置 |
 | `npm run validate` | 检查插件市场、版本、MCP 入口与发布包信息 |
 | `npm test` | 运行结构验证和现有 Node 测试 |
 | `npm run check` | 检查 API 调试台与代码审查的真实 stdio MCP 连接和内联界面 |
@@ -164,7 +179,7 @@ codex plugin remove dbx@dbx-local
 <details>
 <summary>目录约定与单独验证</summary>
 
-新增插件放入 `plugins/<name>/`，包含 `.codex-plugin/plugin.json`、`.mcp.json`、skills、源码和锁文件，并注册到 `.agents/plugins/marketplace.json`。有构建步骤时同时更新安装脚本。
+新增插件放入 `plugins/<name>/`，包含 `.codex-plugin/plugin.json`、`.mcp.json`、skills、源码、锁文件及独立的 `install.mjs` 入口，并注册到 `.agents/plugins/marketplace.json`；同时在根目录 `package.json` 添加对应的 `install:<简称>` 命令。有构建步骤时同时更新安装逻辑。
 
 任务看板直接运行源码；API 界面构建产物在其 `dist/index.html`；DBX 原生程序和工作台由安装器下载。这些构建产物及 `node_modules` 不提交到 Git。DBX 的打包、校验与发布顺序见 [DBX 维护说明](plugins/dbx/README.md)。
 
