@@ -18,7 +18,7 @@ import {stageReviewedFile} from '../src/review-stage.mjs';
 import {TaskContextProvider} from '../src/task-context-provider.mjs';
 import {createHash} from 'node:crypto';
 const digest=f=>createHash('sha256').update(JSON.stringify([f.path,f.before,f.after])).digest('hex');
-export const VERSION='0.5.0';
+export const VERSION='0.5.1';
 export const URI=`ui://codex-local-review/${VERSION}/workbench.html`;
 export function html(){const safe=s=>s.replaceAll('</script','<\\/script');const libraries=['diff/dist/diff.js','@highlightjs/cdn-assets/highlight.min.js'].map(p=>`<script>${safe(readFileSync(new URL('../node_modules/'+p,import.meta.url),'utf8'))}</script>`).join('');return readFileSync(new URL('../ui/index.html',import.meta.url),'utf8').replace('<!-- STYLES -->',()=>`<style>${readFileSync(new URL('../ui/styles.css',import.meta.url),'utf8')}</style>`).replace('<!-- SCRIPT -->',()=>libraries+`<script type="module">${(readFileSync(new URL('../ui/diff.mjs',import.meta.url),'utf8').replaceAll('export function','function')+'\n'+readFileSync(new URL('../ui/app.mjs',import.meta.url),'utf8')+'\n'+readFileSync(new URL('../ui/git-workbench.mjs',import.meta.url),'utf8')+'\n'+readFileSync(new URL('../ui/review-surface.mjs',import.meta.url),'utf8').replaceAll('export function','function')).replaceAll('</script','<\\/script')}</script>`);}
 export async function createServer({picker=pickFolders,taskContexts=new TaskContextProvider(),dir=process.env.LOCAL_REVIEW_HOME??join(process.env.CODEX_HOME??join(homedir(),'.codex'),'local-review')}={}){

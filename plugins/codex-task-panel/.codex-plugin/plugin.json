@@ -1,6 +1,6 @@
 {
   "name": "codex-task-panel",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "本地任务泳道看板，选择导入 TAPD 任务，绑定或新建 Codex 空会话。",
   "author": {
     "name": "Local developer"
