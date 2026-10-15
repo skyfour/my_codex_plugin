@@ -7,3 +7,5 @@ test('normal hooks run and rejection keeps HEAD and index available',async t=>{c
 test('detached HEAD and ongoing operations cannot be committed by generic flow',async t=>{const {root,git,write}=await fixture(t);await write('.git/MERGE_HEAD',git('rev-parse','HEAD'));await assert.rejects(prepareCommit(root),/合并/);await rm(join(root,'.git/MERGE_HEAD'));git('checkout','--detach','-q');await assert.rejects(prepareCommit(root),/detached HEAD/);});
 
 test('confirmation includes externally staged gitlinks instead of silently omitting them',async t=>{const {root,git}=await fixture(t);git('update-index','--add','--cacheinfo','160000,'+git('rev-parse','HEAD')+',module');const p=await prepareCommit(root);assert.deepEqual(p.files.map(f=>f.path).sort(),['module','tracked']);});
+
+test('inline composer can prepare an empty index while commit remains rejected',async t=>{const {root,git}=await fixture(t);git('reset','-q','HEAD');const p=await prepareCommit(root,{allowEmpty:true});assert.equal(p.token,null);assert.deepEqual(p.files,[]);await assert.rejects(commitStaged(root,{token:p.token,message:'no changes'}),/没有已暂存/);});
