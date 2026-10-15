@@ -13,7 +13,8 @@ test('missing keyword is fetched by board and persisted; cached/manual keyword n
 test('failed refresh preserves saved keyword; absent credential never calls gateway',async t=>{
  const {service,store,id}=fixture(t,{credentials:async()=>null,readKeyword:async()=>{throw Error('must not call');}});
  await assert.rejects(service.get(id),/TAPD_CREDENTIAL_REQUIRED/);store.saveScmKeyword(id,'saved');await assert.rejects(service.get(id,{refresh:true}),/TAPD_CREDENTIAL_REQUIRED/);assert.equal(store.scmKeyword(id),'saved');
- service.credentials=async()=>'fake';service.readKeyword=async()=> 'line\nbreak';await assert.rejects(service.get(id,{refresh:true}),/INVALID_SCM_KEYWORD/);assert.equal(store.scmKeyword(id),'saved');
+ service.credentials=async()=>'fake';
+ service.readKeyword=async()=> 'line\nbreak';await assert.rejects(service.get(id,{refresh:true}),/INVALID_SCM_KEYWORD/);assert.equal(store.scmKeyword(id),'saved');
 });
 test('board alone loads environment token and explicit local replacement',async t=>{
  const dir=await mkdtemp(join(tmpdir(),'context-credential-'));t.after(()=>rm(dir,{recursive:true,force:true}));

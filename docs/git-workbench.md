@@ -5,7 +5,7 @@
 - 顶部分支按钮打开本地 / 远程分支选择，也支持新建并切换。本地切换用 Git 正常保护机制，冲突时停止，不强制切换或自动 stash。
 - 顶部 Fetch / Pull / Push 提供远程与分支选择。Fetch / Pull 主按钮直接使用当前跟踪目标；缺少明确目标时进入选择界面，Pull / Push 下拉可更改目标，Push 仍需核对确认。Fetch 更新远程引用；Pull 只允许 fast-forward，并保留可安全携带的本地改动；会覆盖文件时由 Git 停止，不自动 stash；Push 展示远程与目标分支、可设置 upstream，不提供 force push。使用系统已有 Git 认证，不在插件保存认证信息。
 - 文件层操作包括 Stage / Unstage / Discard；范围层包括 Stage All / Unstage All / Discard All，全部操作独立于文件搜索条件。Discard 仅丢弃未暂存内容，已暂存内容保留；未跟踪普通文件会删除，必须在确认中列出。
-- 改动块层提供 Stage Hunk / Unstage Hunk / Discard Hunk，使用 Git 生成的补丁，不接受客户端传入补丁。部分暂存文件在「全部」视图中明确提示切换到暂存或未暂存范围后进行局部操作，避免把 HEAD、index、磁盘三份内容混为一谈。
+- 改动块层提供 Stage Hunk / Unstage Hunk / Discard Hunk，使用 Git 生成的补丁，不接受客户端传入补丁。部分暂存文件在 Summary 中按暂存与未暂存分区分别操作，文件标签也携带各自比较范围；不能对混合的 HEAD → 磁盘差异执行局部操作。
 - Discard 与 Push 在执行前展示具体范围 / 目标；所有操作执行前校验预览状态，过期时要求刷新。确认取消不写入。操作完成刷新分支、提交记录、文件、暂存区与提交草稿。
 - 历史比较仅展示内容，不显示文件 / 改动块写操作。审查快照保留上一批实现的核对后 Stage 能力；普通 Git 操作回到实时工作区进行。
 

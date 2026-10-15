@@ -4,9 +4,9 @@
 
 | 插件 | 版本 | 打开方式 |
 | --- | --- | --- |
-| [任务看板](plugins/codex-task-panel) | 0.4.5 | 打开任务看板 |
-| [API 调试台](plugins/codex-api-client) | 0.1.0 | 打开 API 调试台 |
-| [本地代码审查](plugins/codex-local-review) | 0.4.3 | 打开本地代码审查 |
+| [任务看板](plugins/codex-task-panel) | 0.4.6 | 打开任务看板 |
+| [API 调试台](plugins/codex-api-client) | 0.1.1 | 打开 API 调试台 |
+| [本地代码审查](plugins/codex-local-review) | 0.5.0 | 打开本地代码审查 |
 | [DBX 数据库工作台](plugins/dbx) | 0.6.39 | 点击 Codex 左侧 DBX 图标 |
 
 ## 在其他电脑安装
@@ -88,3 +88,5 @@ npm run test:local-review-ui
 市场结构参考 [OpenAI 官方插件打包文档](https://developers.openai.com/plugins/build/plugins#marketplace-metadata)。
 
 任务看板与代码审查通过[提交上下文接口](docs/task-commit-context.md)联动。安装器会将已安装看板的接口登记到本机 `${CODEX_HOME:-~/.codex}/integrations/task-commit-context-v1.json`；其中只有协议版本和入口路径，不包含凭据或任务数据。两插件更新后重开 Codex 即可使用。
+
+代码审查的审阅流程见 [Summary 与文件标签](docs/review-surface.md) 和 [Git 工作台操作](docs/git-workbench.md)；三个插件的界面验证记录见[界面与操作复核](docs/ui-review-2026-10-15.md)。

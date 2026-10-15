@@ -24,7 +24,7 @@ export const defaultDataDir=()=>process.env.TASK_PANEL_HOME??join(process.env.CO
 export function createPanelServer({dataDir=defaultDataDir(),env=process.env,store=new BoardStore(join(dataDir,'board.sqlite')),credentials=()=>loadToken(dataDir,env),read,threads,scmRead=readScmKeyword}={}){
   const commitContexts=new CommitContextService({store,credentials,readKeyword:scmRead});
   const sessions=new ThreadService(store,threads);
-  const imports=new ImportService({store,credentials,read}),server=new McpServer({name:'codex-task-panel',version:'0.4.5'}),actions=new Map(),toolDefinitions=[];
+  const imports=new ImportService({store,credentials,read}),server=new McpServer({name:'codex-task-panel',version:'0.4.6'}),actions=new Map(),toolDefinitions=[];
   const summaries=()=>{const snapshot=store.snapshot();return {...snapshot,tasks:snapshot.tasks.map(({body,...t})=>t)};};
   const status=async()=>{let credentialReady=false,credentialError=null;try{credentialReady=Boolean(await credentials());}catch(e){credentialError=errorText(e);}return {config:store.config(),credentialReady,credentialError,credentialEnv:Boolean(env.TAPD_ACCESS_TOKEN),lastImport:store.history()[0]??null};};
   const output=(data)=>({content:[{type:'text',text:'操作完成'}],structuredContent:data});
