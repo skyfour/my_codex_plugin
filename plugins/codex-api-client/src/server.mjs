@@ -16,7 +16,7 @@ const sidebarIcons=[{src:`data:image/svg+xml;base64,${readFileSync(new URL('../a
 export const defaultDataDirectory=()=>process.env.CODEX_API_CLIENT_DATA_DIR||join(homedir(),'Library','Application Support','Codex API Client');
 export function createServer({directory=defaultDataDirectory(),secrets}={}) {
   const store=new Store(directory,secrets),service=new ApiService(store);
-  const server=new McpServer({name:'codex-api-client',version:'0.1.0',icons:sidebarIcons});
+  const server=new McpServer({name:'codex-api-client',version:'0.1.1',icons:sidebarIcons});
   const publishedTools=[];
   registerAppResource(server,'Codex API Client',APP_URI,{_meta:{ui:{prefersBorder:false,csp:{connectDomains:[],resourceDomains:[]}}}},async()=>({
     contents:[{uri:APP_URI,mimeType:RESOURCE_MIME_TYPE,text:await readFile(new URL('../dist/index.html',import.meta.url),'utf8'),_meta:{ui:{prefersBorder:false,csp:{connectDomains:[],resourceDomains:[]}}}}],

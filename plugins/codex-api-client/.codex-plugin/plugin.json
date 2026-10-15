@@ -1,8 +1,10 @@
 {
   "name": "codex-api-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local Postman-style API debugging with collections, environments and Postman scripts.",
-  "author": { "name": "Local developer" },
+  "author": {
+    "name": "Local developer"
+  },
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
@@ -11,7 +13,11 @@
     "longDescription": "在 Codex 内编辑 HTTP 请求、管理本地集合与环境、运行 Postman 脚本并检查响应和断言。",
     "developerName": "Local developer",
     "category": "developer-tools",
-    "capabilities": ["HTTP debugging", "Postman scripts", "local collections"],
+    "capabilities": [
+      "HTTP debugging",
+      "Postman scripts",
+      "local collections"
+    ],
     "defaultPrompt": "打开 API 调试台。",
     "brandColor": "#F36A3D",
     "composerIcon": "./assets/icon-mark.png",

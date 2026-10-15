@@ -1,14 +1,17 @@
 {
   "name": "codex-api-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.13" },
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "start": "node --experimental-sqlite src/server.mjs",
     "dev": "node --experimental-sqlite scripts/dev.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "node --experimental-sqlite --test tests/*.test.mjs",
+    "test:ui": "npm run build && playwright test --config playwright.tree.config.ts",
     "check": "node --experimental-sqlite scripts/check.mjs",
     "install:local": "node scripts/install-local.mjs"
   },

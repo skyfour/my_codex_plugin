@@ -16,3 +16,16 @@ export function diffEntries(rows,{full=false,expanded=new Set()}={}){
  if(!full)for(let i=0;i<rows.length;i++)if(rows[i].type==='change')for(let j=Math.max(0,i-3);j<=Math.min(rows.length-1,i+3);j++)keep[j]=true;
  const result=[];for(let i=0;i<rows.length;){if(!keep[i]){const start=i;while(i<rows.length&&!keep[i])i++;result.push({fold:true,start,end:i,count:i-start});}else{result.push({...rows[i],index:i});i++;}}return result;
 }
+
+export function changeBlocks(rows){
+ const blocks=[];
+ for(let i=0;i<rows.length;){
+  if(rows[i].type!=='change'){i++;continue;}
+  const index=i;while(i<rows.length&&rows[i].type==='change')i++;
+  const group=rows.slice(index,i),old=group.map(r=>r.old).filter(n=>n!==null),next=group.map(r=>r.new).filter(n=>n!==null);
+  const range=lines=>lines.length?`第 ${lines[0]}${lines.length>1?'–'+lines.at(-1):''} 行`:'无对应行';
+  const kind=!old.length?'新增':!next.length?'删除':'修改';
+  blocks.push({index,label:`${kind} ${blocks.length+1} · 修改前：${range(old)} → 修改后：${range(next)}`});
+ }
+ return blocks;
+}

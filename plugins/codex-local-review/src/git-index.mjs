@@ -1,3 +1,4 @@
+import {withGitWrite} from './git-lock.mjs';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {lstat,realpath} from 'node:fs/promises';
@@ -5,7 +6,7 @@ import {resolve,relative,dirname,isAbsolute} from 'node:path';
 import {createHash} from 'node:crypto';
 const exec=promisify(execFile),conflicts=new Set(['DD','AU','UD','UA','DU','AA','UU']);
 function environment(){const env={...process.env};for(const key of Object.keys(env))if(key.startsWith('GIT_'))delete env[key];return {...env,GIT_TERMINAL_PROMPT:'0',GIT_OPTIONAL_LOCKS:'0'};}
-export async function git(root,args){return (await exec('git',['--literal-pathspecs','-c','core.fsmonitor=false','-C',root,...args],{encoding:'utf8',maxBuffer:8*1024*1024,timeout:30000,env:environment()})).stdout;}
+export async function git(root,args,{input,timeout=30000}={}){const command=exec('git',['--literal-pathspecs','-c','core.fsmonitor=false','-C',root,...args],{encoding:'utf8',maxBuffer:8*1024*1024,timeout,env:environment()});if(input!==undefined&&command.child.stdin){command.child.stdin.on('error',()=>{});command.child.stdin.end(input);}return (await command).stdout;}
 function hash(value){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 function checkPath(root,path){const rel=relative(root,resolve(root,path));if(!path||isAbsolute(path)||rel!==path||rel==='..'||rel.startsWith('../')||path.includes('\0')||path.split('/').some(p=>p.toLowerCase()==='.git'))throw Error('只能操作当前仓库中的具体文件');}
 export async function indexState(root){
@@ -23,7 +24,8 @@ export async function indexState(root){
  }
  return {root,head,files};
 }
-export async function changeIndex(root,{operation,files}){
+export async function changeIndex(root,args){return withGitWrite(root,()=>changeIndexUnlocked(root,args));}
+async function changeIndexUnlocked(root,{operation,files}){
  if(!['stage','unstage'].includes(operation)||!Array.isArray(files)||!files.length||files.length>300)throw Error('请选择 1–300 个文件');
  const state=await indexState(root),available=new Map(state.files.map(f=>[f.path,f])),seen=new Set();
  for(const item of files){checkPath(state.root,item.path);if(seen.has(item.path))throw Error('不能重复选择同一个文件');seen.add(item.path);const current=available.get(item.path);
