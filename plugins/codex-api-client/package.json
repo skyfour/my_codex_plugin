@@ -9,6 +9,7 @@
     "dev": "node --experimental-sqlite scripts/dev.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "node --experimental-sqlite --test tests/*.test.mjs",
+    "test:ui": "npm run build && playwright test --config playwright.tree.config.ts",
     "check": "node --experimental-sqlite scripts/check.mjs",
     "install:local": "node scripts/install-local.mjs"
   },
