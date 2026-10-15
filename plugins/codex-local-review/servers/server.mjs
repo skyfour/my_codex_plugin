@@ -11,6 +11,8 @@ import {snapshot,listChanges,ReviewStore,markdown} from '../src/review.mjs';
 import {Projects,browseFolders,discoverProjects,pickFolders,projectFiles,gitRead} from '../src/projects.mjs';
 import {DEFAULT_LIMITS,validateLimits} from '../src/limits.mjs';
 import {indexState,changeIndex} from '../src/git-index.mjs';
+import {prepareCommit,commitStaged} from '../src/git-commit.mjs';
+import {boardTasks} from '../src/task-board.mjs';
 import {createHash} from 'node:crypto';
 const digest=f=>createHash('sha256').update(JSON.stringify([f.path,f.before,f.after])).digest('hex');
 export const VERSION='0.4.0';
@@ -39,6 +41,8 @@ export async function createServer({picker=pickFolders,dir=process.env.LOCAL_REV
  register('project_file',z.object({id,path:z.string().min(1).max(4096),...scope}).strict(),async({id,path,...args})=>{const p=projects.get(id);const r=await snapshot({project:p.path,...args,...(args.mode==='files'?{paths:[path]}:{selection:[path]})},limits());const file=r.files[0];return {file:{...file,digest:digest(file)}};});
  register('limits_configure',z.object({fileMiB:z.number().int().min(1).max(20),totalMiB:z.number().int().min(10).max(200)}).strict(),args=>{const value=validateLimits(args);projects.preference('limits',value);return {limits:value};},{write:true});
  register('git_index_change',z.object({id,mode:z.enum(['working','staged','unstaged']),operation:z.enum(['stage','unstage']),files:z.array(z.object({path:z.string().min(1).max(4096),fingerprint:z.string().regex(/^[a-f0-9]{64}$/)}).strict()).min(1).max(300),preview:z.object({path:z.string().min(1),digest:z.string().regex(/^[a-f0-9]{64}$/)}).strict().optional()}).strict(),async({id,mode,operation,files,preview})=>{const p=projects.get(id);if(!p.isGit)throw Error('当前项目不是 Git 仓库');if(preview){const current=await snapshot({project:p.path,mode,selection:[preview.path]},limits());if(!current.files[0]||digest(current.files[0])!==preview.digest)throw Error('当前文件内容已经变化，请刷新后再执行 Git 操作');}return changeIndex(p.path,{operation,files});},{write:true});
+ register('commit_prepare',z.object({id}).strict(),async({id})=>{const p=projects.get(id);if(!p.isGit)throw Error('当前项目不是 Git 仓库');return {...await prepareCommit(p.path),...boardTasks()};});
+ register('commit_execute',z.object({id,token:z.string().regex(/^[a-f0-9]{64}$/),message:z.string().trim().min(1).max(10000),taskId:z.string().uuid().optional()}).strict(),async({id,token,message,taskId})=>{const p=projects.get(id);if(!p.isGit)throw Error('当前项目不是 Git 仓库');if(taskId){const t=boardTasks().tasks.find(t=>t.id===taskId);if(!t?.keyword)throw Error('任务关键字缺失，请先到任务看板获取');if(!message.split('\n').includes(t.keyword))throw Error('任务关键字已经变化，请重新选择任务核对提交信息');}return commitStaged(p.path,{token,message});},{write:true});
  register('review_get',z.object({id}).strict(),({id})=>({review:store.get(id)}));
  register('review_update',z.object({id,version:z.number().int().positive(),path:z.string(),reviewed:z.boolean().optional(),deleteComment:id.optional(),comment:z.object({side:z.enum(['before','after']),line:z.number().int().positive(),severity:z.enum(['note','issue','blocking']),text:z.string().min(1).max(10000)}).strict().optional()}).strict(),args=>({review:store.update(args)}),{write:true});
  register('review_export',z.object({id}).strict(),({id})=>{const r=store.get(id);return {markdown:markdown(r),json:JSON.stringify(r,null,2)};});

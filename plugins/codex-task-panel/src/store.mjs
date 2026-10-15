@@ -16,6 +16,7 @@ export class BoardStore {
       CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value INTEGER NOT NULL);
       INSERT OR IGNORE INTO meta VALUES('schema',1);
       CREATE TABLE IF NOT EXISTS lanes(id TEXT PRIMARY KEY,name TEXT NOT NULL UNIQUE,position INTEGER NOT NULL,version INTEGER NOT NULL DEFAULT 1);
+      CREATE TABLE IF NOT EXISTS task_scm(task_id TEXT PRIMARY KEY REFERENCES tasks(id),keyword TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY,source_key TEXT NOT NULL UNIQUE,source_json TEXT NOT NULL,hash TEXT NOT NULL,lane_id TEXT NOT NULL REFERENCES lanes(id),position INTEGER NOT NULL,version INTEGER NOT NULL DEFAULT 1,imported_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,request_hash TEXT NOT NULL,result_json TEXT NOT NULL,created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY CHECK(id=1),workspace_id TEXT NOT NULL DEFAULT '',owner_name TEXT NOT NULL DEFAULT '',version INTEGER NOT NULL DEFAULT 1,identity_json TEXT);
@@ -47,6 +48,8 @@ export class BoardStore {
   taskRow(r){return r?{...JSON.parse(r.source_json),id:r.id,laneId:r.lane_id,position:r.position,version:r.version,hash:r.hash,importedAt:r.imported_at,threadCount:this.db.prepare('SELECT COUNT(*) AS n FROM task_threads WHERE task_id=?').get(r.id).n}:null;}
   snapshot(){return {workflow:this.workflow(),lanes:this.db.prepare('SELECT id,name,position,version FROM lanes ORDER BY position,id').all(),tasks:this.db.prepare('SELECT * FROM tasks ORDER BY position,id').all().map(r=>this.taskRow(r))};}
   getTask(id){const task=this.taskRow(this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id));if(!task)throw new Error('TASK_NOT_FOUND');return task;}
+  scmKeyword(id){this.getTask(id);return this.db.prepare('SELECT keyword FROM task_scm WHERE task_id=?').get(id)?.keyword??'';}
+  saveScmKeyword(id,keyword){this.getTask(id);if(typeof keyword!=='string'||keyword.length>2048||/[\x00-\x1f]/.test(keyword))throw Error('INVALID_SCM_KEYWORD');this.db.prepare('INSERT INTO task_scm VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET keyword=excluded.keyword').run(id,keyword.trim());return {task:{...this.getTask(id),scmKeyword:this.scmKeyword(id)}};}
   findSource(s){return this.taskRow(this.db.prepare('SELECT * FROM tasks WHERE source_key=?').get(sourceKey(s)));}
   threads(taskId){this.getTask(taskId);return this.db.prepare('SELECT thread_id AS id,title,cwd,bound_at AS boundAt FROM task_threads WHERE task_id=? ORDER BY bound_at,thread_id').all(taskId);}
   bindThreads(taskId,threads){this.getTask(taskId);this.transaction(()=>{for(const t of threads)this.db.prepare('INSERT OR IGNORE INTO task_threads VALUES(?,?,?,?,?)').run(taskId,t.id,t.title,t.cwd,Date.now());});}

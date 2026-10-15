@@ -92,7 +92,7 @@ function retryAfter(response) {
 }
 
 async function requestJson(path, search, {token, fetchImpl, signal, externalSignal, deadlineSignal, bytes}) {
-  if (path !== '/users/info' && path !== '/tasks') throw failure('TAPD_HTTP_FAILED');
+  if (path !== '/users/info' && path !== '/tasks' && path !== '/svn_commits/get_scm_copy_keywords') throw failure('TAPD_HTTP_FAILED');
   const url = new URL(path, BASE_URL);
   for (const [key, value] of Object.entries(search)) url.searchParams.set(key, String(value));
   const timeout = new AbortController();
@@ -288,4 +288,10 @@ export async function readTapd(input, {fetchImpl = fetch, now = Date.now} = {}) 
   } finally {
     clearTimeout(timer);
   }
+}
+
+export async function readScmKeyword({token,workspaceId,objectId},{fetchImpl=fetch}={}){
+ if(typeof token!=='string'||!/^[!-~]{1,4096}$/.test(token)||!decimalId(workspaceId)||!decimalId(objectId))throw failure('INVALID_TAPD_INPUT');
+ const keyword=await requestJson('/svn_commits/get_scm_copy_keywords',{workspace_id:workspaceId,object_id:objectId,type:'task'},{token,fetchImpl,bytes:{total:0},deadlineSignal:new AbortController().signal});
+ if(typeof keyword!=='string'||!keyword.trim()||keyword.length>2048||/[\x00-\x1f]/.test(keyword))throw failure('TAPD_RESPONSE_INVALID');return keyword.trim();
 }

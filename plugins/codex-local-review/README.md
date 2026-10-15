@@ -44,3 +44,9 @@ Stage 使用 `git add --all -- <所选具体文件>` 暂存当前磁盘内容（
 操作只响应用户在面板的明确点击，使用固定命令与字面文件路径，不接受任意 shell。列表过期、暂存区锁定、未解决冲突或子模块会给出明确反馈；不会自动删除锁文件、解决冲突、提交、推送或修改源文件。
 
 参考：[git add](https://git-scm.com/docs/git-add)、[git restore](https://git-scm.com/docs/git-restore)。
+
+## 开发中：TAPD 任务联动提交（尚未发布）
+
+任务看板的任务详情可调用 TAPD `GET /svn_commits/get_scm_copy_keywords` 获取并缓存完整源码关键字，也可手动保存原文。代码审查工作区顶部的「提交…」读取同一 `TASK_PANEL_HOME`（默认 `$CODEX_HOME/task-panel`）内的本地看板，选择任务后在提交说明下附加完整关键字。两插件只通过现有本地 SQLite 数据联动，无额外服务；审查插件以只读模式打开看板。
+
+提交窗口展示仓库、分支和所有暂存文件，只提交暂存区；未暂存内容保持原状。HEAD、分支或暂存树变化时要求重新核对。支持首次提交，保留正常 Git hooks；拒绝空暂存区、冲突、detached HEAD 及进行中的 merge/rebase/cherry-pick/revert。只创建本地 commit，不 push、不改变 TAPD 状态。TAPD 远端关联仍需项目的源码应用和仓库 Webhook 接入；本地 commit 不代表 TAPD 已收到记录。

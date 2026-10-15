@@ -5,7 +5,7 @@ import {resolve,relative,dirname,isAbsolute} from 'node:path';
 import {createHash} from 'node:crypto';
 const exec=promisify(execFile),conflicts=new Set(['DD','AU','UD','UA','DU','AA','UU']);
 function environment(){const env={...process.env};for(const key of Object.keys(env))if(key.startsWith('GIT_'))delete env[key];return {...env,GIT_TERMINAL_PROMPT:'0',GIT_OPTIONAL_LOCKS:'0'};}
-async function git(root,args){return (await exec('git',['--literal-pathspecs','-c','core.fsmonitor=false','-C',root,...args],{encoding:'utf8',maxBuffer:8*1024*1024,timeout:30000,env:environment()})).stdout;}
+export async function git(root,args){return (await exec('git',['--literal-pathspecs','-c','core.fsmonitor=false','-C',root,...args],{encoding:'utf8',maxBuffer:8*1024*1024,timeout:30000,env:environment()})).stdout;}
 function hash(value){return createHash('sha256').update(JSON.stringify(value)).digest('hex');}
 function checkPath(root,path){const rel=relative(root,resolve(root,path));if(!path||isAbsolute(path)||rel!==path||rel==='..'||rel.startsWith('../')||path.includes('\0')||path.split('/').some(p=>p.toLowerCase()==='.git'))throw Error('只能操作当前仓库中的具体文件');}
 export async function indexState(root){
