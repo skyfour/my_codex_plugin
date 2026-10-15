@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js';
 import {createPanelServer,BOARD_URI} from '../servers/server.mjs';
@@ -11,7 +12,8 @@ test('MCP exposes sidebar resource, separates board summaries from full details 
  const {server}=createPanelServer({store,credentials:async()=>null});const client=new Client({name:'test',version:'1'});
  const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
  try{const listed=await client.listTools();const open=listed.tools.find(t=>t.name==='board_open');assert.deepEqual(open.icons.map(i=>i.theme),[undefined]);assert.ok(open.icons.every(i=>i.mimeType==='image/svg+xml'&&i.src.startsWith('data:image/svg+xml;base64,')));const fallback=Buffer.from(open.icons[0].src.split(',')[1],'base64').toString();
-   assert.match(fallback,/stroke="currentColor"/);assert.match(fallback,/fill="currentColor"/);
+   assert.equal(fallback,readFileSync(new URL('../assets/icon-sidebar.svg',import.meta.url),'utf8'));
+   assert.match(fallback,/stroke="currentColor"/);assert.match(fallback,/fill="none"/);
    assert.doesNotMatch(fallback,/#[0-9a-f]{3,8}\b/i,'sidebar must inherit the host color');
    assert.equal(open.title,'任务看板');assert.equal(open.annotations.title,'任务看板');assert.equal(open._meta.ui.resourceUri,BOARD_URI);assert.equal(open._meta['openai/ui'].entrypoints[0].type,'global');
    assert.deepEqual(listed.tools.find(t=>t.name==='import_commit')._meta.ui.visibility,['app']);
