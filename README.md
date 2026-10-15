@@ -35,6 +35,8 @@ node scripts/install.mjs --plugin dbx
 
 如果已安装旧市场 `task-panel-local` 或 `codex-api-client-local` 中的插件，在 Codex 插件设置中停用旧实例，避免出现重复入口；确认新实例正常后再卸载旧实例。安装脚本不删除旧插件或本地数据。
 
+如果这台电脑已安装 `dbx@dbx-local`，先按上面的命令安装 `dbx@my-codex-plugins` 并确认左侧 DBX 能打开，再执行 `codex plugin remove dbx@dbx-local`，避免出现两个 DBX 入口。旧市场和数据库数据目录不会被安装脚本自动删除。
+
 ## 更新插件
 
 ```sh
