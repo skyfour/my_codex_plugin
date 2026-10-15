@@ -1,7 +1,7 @@
 {
   "name": "codex-local-review",
-  "version": "0.3.1",
-  "description": "多项目本地人工代码审查：项目切换、提交历史、准确差异与行内评论。",
+  "version": "0.4.0",
+  "description": "多项目本地代码审查、Stage / Unstage、提交历史、准确差异与行内评论。",
   "author": {
     "name": "Local developer"
   },
@@ -18,7 +18,9 @@
       "系统文件夹选择",
       "提交历史",
       "对齐差异与语法高亮",
-      "行内评论与审查记录"
+      "行内评论与审查记录",
+      "文件级 Stage / Unstage",
+      "可配置预览上限"
     ],
     "defaultPrompt": "打开本地代码审查。",
     "logo": "assets/icon-sidebar.svg"

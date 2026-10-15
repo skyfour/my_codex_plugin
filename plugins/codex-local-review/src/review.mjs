@@ -4,13 +4,15 @@ import {readFile,realpath,stat,mkdir,chmod} from 'node:fs/promises';
 import {resolve,relative,isAbsolute,join} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
+import {DEFAULT_LIMITS,validateLimits,SizeLimitError} from './limits.mjs';
 const exec=promisify(execFile),LIMIT=1024*1024;
-async function git(root,args){return (await exec('git',['-c','core.fsmonitor=false','-c','diff.external=','-C',root,...args],{encoding:'utf8',maxBuffer:12*LIMIT,timeout:15000,env:{...process.env,GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0'}})).stdout;}
+async function git(root,args,maxBuffer=24*LIMIT){return (await exec('git',['-c','core.fsmonitor=false','-c','diff.external=','-C',root,...args],{encoding:'utf8',maxBuffer,timeout:15000,env:{...process.env,GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0'}})).stdout;}
 function bounded(root,path){const full=resolve(root,path),rel=relative(root,full);if(isAbsolute(rel)||rel==='..'||rel.startsWith('../'))throw Error('文件必须位于项目目录内');return full;}
-async function disk(root,path,allowMissing=false){const full=bounded(root,path);let actual;try{actual=await realpath(full);}catch(e){if(e.code==='ENOENT'&&allowMissing)return '';throw e;}bounded(root,actual);const s=await stat(actual);if(!s.isFile())throw Error(`不是普通文件：${path}`);if(s.size>LIMIT)throw Error(`文件超过 1 MiB：${path}`);return readFile(actual,'utf8');}
+async function disk(root,path,allowMissing=false,limits=DEFAULT_LIMITS){const full=bounded(root,path);let actual;try{actual=await realpath(full);}catch(e){if(e.code==='ENOENT'&&allowMissing)return '';throw e;}bounded(root,actual);const s=await stat(actual);if(!s.isFile())throw Error(`不是普通文件：${path}`);if(s.size>limits.fileMiB*LIMIT)throw new SizeLimitError({path,bytes:s.size,limitMiB:limits.fileMiB});return readFile(actual,'utf8');}
 async function revision(root,ref){if(!ref||ref.startsWith('-'))throw Error('请输入有效的本地提交或分支');return (await git(root,['rev-parse','--verify','--end-of-options',`${ref}^{commit}`])).trim();}
-async function indexBlob(root,path){const entries=(await git(root,['ls-files','--stage','-z','--',path])).split('\0').filter(Boolean).map(s=>{const i=s.indexOf('\t');return {header:s.slice(0,i).split(' '),path:s.slice(i+1)};}).filter(e=>e.path===path);if(!entries.length)return '';const entry=entries.find(e=>e.header[2]==='0');if(!entry)throw Error(`文件有未解决的合并冲突，请先解决或使用指定文件模式：${path}`);if(entry.header[0]==='160000')throw Error(`暂不支持子模块差异：${path}`);return git(root,['show',`:${path}`]);}
-async function blob(root,ref,path){const exists=await git(root,['ls-tree','-z',ref,'--',path]);if(!exists)return '';return git(root,['show',`${ref}:${path}`]);}
+async function gitSize(root,oid,path,limits){const bytes=Number((await git(root,['cat-file','-s',oid])).trim());if(bytes>limits.fileMiB*LIMIT)throw new SizeLimitError({path,bytes,limitMiB:limits.fileMiB});}
+async function indexBlob(root,path,limits){const entries=(await git(root,['ls-files','--stage','-z','--',path])).split('\0').filter(Boolean).map(s=>{const i=s.indexOf('\t');return {header:s.slice(0,i).split(' '),path:s.slice(i+1)};}).filter(e=>e.path===path);if(!entries.length)return '';const entry=entries.find(e=>e.header[2]==='0');if(!entry)throw Error(`文件有未解决的合并冲突，请先解决或使用指定文件模式：${path}`);if(entry.header[0]==='160000')throw Error(`暂不支持子模块差异：${path}`);await gitSize(root,entry.header[1],path,limits);return git(root,['show',`:${path}`]);}
+async function blob(root,ref,path,limits){const entries=(await git(root,['ls-tree','-z',ref,'--',path])).split('\0').filter(Boolean);const entry=entries.find(e=>e.slice(e.indexOf('\t')+1)===path);if(!entry)return '';const [mode,type,oid]=entry.slice(0,entry.indexOf('\t')).split(' ');if(type!=='blob')throw Error(`暂不支持子模块或目录的文本差异：${path}`);await gitSize(root,oid,path,limits);return git(root,['show',`${ref}:${path}`]);}
 async function plan({project,mode='working',base='HEAD',target='HEAD',paths=[]}){
  const root=await realpath(resolve(project));if(!(await stat(root)).isDirectory())throw Error('项目路径不是目录');
  let files=[],beforeRef=null,afterRef=null;
@@ -25,23 +27,24 @@ async function plan({project,mode='working',base='HEAD',target='HEAD',paths=[]})
    if(mode==='staged')args.push('--cached');else if(mode!=='unstaged'&&mode!=='working')throw Error('不支持的审查范围');
    if(mode==='working'&&beforeRef)args.push(beforeRef);
    args.push('--');files=(await git(root,args)).split('\0').filter(Boolean);
-   if(mode==='working'){if(!beforeRef)files.push(...(await git(root,['ls-files','-z'])).split('\0').filter(Boolean));files.push(...(await git(root,['ls-files','--others','--exclude-standard','-z'])).split('\0').filter(Boolean));}
-   if(mode==='unstaged')beforeRef=':';
+   if(mode==='working'){files.push(...(await git(root,['diff','--cached','--no-ext-diff','--no-textconv','--no-renames','--name-only','-z','--'])).split('\0').filter(Boolean));if(!beforeRef)files.push(...(await git(root,['ls-files','-z'])).split('\0').filter(Boolean));files.push(...(await git(root,['ls-files','--others','--exclude-standard','-z'])).split('\0').filter(Boolean));}
+   if(mode==='unstaged'){beforeRef=':';files.push(...(await git(root,['ls-files','--others','--exclude-standard','-z'])).split('\0').filter(Boolean));}
   }
  }
  return {root,files:[...new Set(files)],beforeRef,afterRef,mode};
 }
 export async function listChanges(args){const p=await plan(args);return {project:p.root,mode:p.mode,base:p.beforeRef,target:p.afterRef,files:p.files.map(path=>({path}))};}
-export async function snapshot(args){
+export async function snapshot(args,limits=DEFAULT_LIMITS){
+ limits=validateLimits(limits);
  const prepared=await plan(args);const {root,beforeRef,afterRef,mode}=prepared;let {files}=prepared;if(args.selection){const available=new Set(files);if(args.selection.some(p=>!available.has(p)))throw Error('文件改动已变化，请刷新');files=args.selection;}
  if(files.length>300)throw Error('超过 300 个文件，请缩小范围');
  const result=[];let size=0;
  for(const path of files){bounded(root,path);let before='';
-  if(mode==='unstaged')before=await indexBlob(root,path);
-  else if(beforeRef)before=await blob(root,beforeRef,path);
-  let after;if(afterRef)after=await blob(root,afterRef,path);else if(mode==='staged')after=await indexBlob(root,path);else after=await disk(root,path,mode!=='files');
-  if(Buffer.byteLength(before)>LIMIT||Buffer.byteLength(after)>LIMIT)throw Error(`文件超过 1 MiB：${path}`);
-  size+=Buffer.byteLength(before)+Buffer.byteLength(after);if(size>10*LIMIT)throw Error('快照超过 10 MiB，请缩小范围');
+  if(mode==='unstaged')before=await indexBlob(root,path,limits);
+  else if(beforeRef)before=await blob(root,beforeRef,path,limits);
+  let after;if(afterRef)after=await blob(root,afterRef,path,limits);else if(mode==='staged')after=await indexBlob(root,path,limits);else after=await disk(root,path,mode!=='files',limits);
+  const bytes=Math.max(Buffer.byteLength(before),Buffer.byteLength(after));if(bytes>limits.fileMiB*LIMIT)throw new SizeLimitError({path,bytes,limitMiB:limits.fileMiB});
+  size+=Buffer.byteLength(before)+Buffer.byteLength(after);if(size>limits.totalMiB*LIMIT)throw new SizeLimitError({bytes:size,limitMiB:limits.totalMiB,total:true});
   result.push({path,before,after,binary:before.includes('\0')||after.includes('\0'),reviewed:false});
  }
  return {id:randomUUID(),project:root,mode,base:beforeRef,target:afterRef,createdAt:new Date().toISOString(),version:1,files:result,comments:[]};
