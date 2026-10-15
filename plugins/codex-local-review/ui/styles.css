@@ -21,7 +21,7 @@ button[aria-pressed=true]{background:var(--selected);color:var(--accent);border-
 input,textarea{padding:8px 10px;width:100%;min-width:0}input[type=checkbox]{width:14px;height:14px;accent-color:var(--accent);margin:0}
 input[type=search]{font-size:12px;background:var(--bg)}select{padding:5px 9px;min-width:0}textarea{resize:vertical}
 small,.muted{font-size:12px;color:var(--muted)}
-.app{height:100vh;min-height:600px;max-width:100vw;min-width:0;overflow:hidden;display:grid;grid-template-rows:auto 38px minmax(0,1fr) 26px}
+.app{height:100vh;min-height:600px;max-width:100vw;min-width:0;overflow:hidden;display:grid;grid-template-rows:auto 38px auto minmax(0,1fr) 26px}
 .topbar{min-height:58px;display:flex;align-items:center;gap:20px;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--bg);min-width:0}
 .brand,.toolbar{display:flex;align-items:center;gap:8px}.brand{flex-shrink:0;gap:9px}.brand svg{color:var(--accent)}
 .version{font-size:10px;color:var(--muted);padding:1px 5px;border-radius:4px;background:var(--panel2);white-space:nowrap}
@@ -118,3 +118,8 @@ body[aria-busy=true] button{pointer-events:none;cursor:wait}body[aria-busy=true]
 #commitTaskHint.error{color:var(--red)}
 
 .diff-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+
+.git-command-bar{display:flex;align-items:center;gap:8px;padding:6px 14px;border-bottom:1px solid var(--border);background:var(--panel);flex-wrap:wrap}.git-command-bar #switchBranch{max-width:42%;overflow:hidden;text-overflow:ellipsis;text-align:left}.git-command-bar button{min-height:29px;font-size:12px}.git-command-bar #syncStatus{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:35%}.split-button{display:flex}.split-button button:first-child{border-radius:5px 0 0 5px}.split-button button:last-child{border-radius:0 5px 5px 0;border-left:0;padding-inline:6px}.git-all{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--panel)}.git-all strong{font-size:11px;color:var(--muted)}.git-all button{font-size:11px;min-height:27px;padding:3px 7px}.hunk-notice{font-size:11px;color:var(--muted);padding:7px 14px;background:var(--panel);border-bottom:1px solid var(--border)}.hunk-actions{display:inline-flex;gap:6px;float:right;margin-left:12px}.hunk-actions button{font-size:11px;min-height:25px;padding:2px 8px}.change-location td:after{content:"";display:block;clear:both}#gitDialog{width:min(580px,calc(100vw - 24px))}#gitOperationForm{display:grid;gap:12px}#gitOperationForm>label:not(.check){display:grid;gap:5px}#gitOperationForm input:not([type=checkbox]),#gitOperationForm select{width:100%;min-height:34px;padding:5px 8px}#gitPlanText{white-space:pre-wrap;font-size:12px}#gitPlanFiles{max-height:220px;overflow:auto;font:12px/1.7 Menlo,monospace;overflow-wrap:anywhere;padding-left:22px}#gitOperationForm footer{display:flex;justify-content:flex-end;gap:8px}.file-toolbar>.toolbar{flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:800px){.git-command-bar{gap:6px}.git-command-bar #syncStatus{display:none}.git-all{padding:7px;gap:4px}.git-all strong{width:100%}.hunk-actions{float:none;display:flex;flex-wrap:wrap;margin:5px 0 0}.file-toolbar{flex-wrap:wrap}}
+
+.topbar{grid-row:1}.project-tabs{grid-row:2}.git-command-bar{grid-row:3}.workbench{grid-row:4}.statusbar{grid-row:5}

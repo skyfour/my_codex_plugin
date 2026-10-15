@@ -1,3 +1,4 @@
+import {withGitWrite} from './git-lock.mjs';
 import {createHash} from 'node:crypto';
 import {git,indexState} from './git-index.mjs';
 const hash=v=>createHash('sha256').update(JSON.stringify(v)).digest('hex');
@@ -13,13 +14,10 @@ export async function prepareCommit(root,{allowEmpty=false}={}){
  const files=state.files.filter(f=>f.status!=='??'&&f.status[0]!==' ').map(f=>({path:f.path,status:f.status}));
  return {root:state.root,branch:branch.replace('refs/heads/',''),head:state.head,files,token:empty?null:hash([state.root,gitdir,branch,state.head,tree])};
 }
-const inFlight=new Set();
-export async function commitStaged(root,{token,message}){
+export async function commitStaged(root,args){return withGitWrite(root,()=>commitUnlocked(root,args));}
+async function commitUnlocked(root,{token,message}){
  if(typeof message!=='string'||!message.trim()||message.length>10000||message.includes('\0'))throw Error('请输入有效提交信息（最多 10000 字）');
- if(inFlight.has(root))throw Error('当前仓库正在提交，请等待结果');inFlight.add(root);
- try{
  const state=await prepareCommit(root);if(token!==state.token)throw Error('分支、HEAD 或暂存区已变化，请重新打开提交窗口核对');
  try{await git(state.root,['commit','--cleanup=verbatim','-m',message.trim()]);}catch(e){throw Error('提交未确认完成，请刷新核对 HEAD 后再重试：'+String(e.stderr??e.message).trim().slice(0,1200));}
  const commit=(await git(state.root,['rev-parse','HEAD'])).trim();return {commit,branch:state.branch};
- }finally{inFlight.delete(root);}
 }
