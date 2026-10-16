@@ -11,7 +11,7 @@ function updateGitWorkbench(){
  for(const input of document.querySelectorAll('#gitOperationForm input,#gitOperationForm select,#gitPreviewOperation,#gitCreateBranch,#gitDialog [data-close]'))input.disabled=busy;
  $('gitConfirmOperation').disabled=busy||!gitDialogState?.plan;
 }
-async function refreshAfterGit(preferred=file?.path??failedFile?.path){repository=(await call('project_open',{id:project.id})).repository;review=null;tab='changes';scope={mode:'working'};await loadChanges(preferred);renderProjects();}
+async function refreshAfterGit(preferred=file?.path??failedFile?.path){repository=(await call('project_open',{id:project.id})).repository;review=null;tab='changes';scope={mode:'working'};await loadChanges(preferred,{preserveSummary:true});renderProjects();}
 async function stageAll(operation){await run(async()=>{const state=await call('git_status',{id:project.id}),records=state.files.filter(f=>operation==='stage'?f.canStage:f.canUnstage);if(!records.length)return;await call('git_index_change',{id:project.id,mode:'working',operation,files:records.map(({path,fingerprint})=>({path,fingerprint}))});await refreshAfterGit();},operation==='stage'?'正在暂存全部文件…':'正在取消全部暂存…');}
 function dialogArgs(){
  const d=gitDialogState,args={operation:d.operation};
@@ -50,7 +50,7 @@ async function quickRemote(operation){
 $('switchBranch').onclick=()=>void openGitOperation('switch');$('gitFetch').onclick=()=>void quickRemote('fetch');$('gitPull').onclick=()=>void quickRemote('pull');$('gitPush').onclick=()=>void openGitOperation('push');$('pullOptions').onclick=()=>void openGitOperation('pull',{choose:true});$('pushOptions').onclick=()=>void openGitOperation('push',{choose:true});
 $('discardFile').onclick=()=>void openGitOperation('discard',{paths:[file?.path??failedFile?.path]});$('discardAll').onclick=()=>void openGitOperation('discard');$('stageAll').onclick=()=>void stageAll('stage');$('unstageAll').onclick=()=>void stageAll('unstage');
 function hunkRange(start,count){return count?`第 ${start}${count>1?'–'+(start+count-1):''} 行`:'无对应行';}
-async function mutateHunk(hunk,operation){const context={id:project.id,path:file.path,mode:fileHunkData.mode,token:fileHunkData.token,hunkId:hunk.id,operation,confirmed:true};await run(async()=>{await call('git_hunk_apply',context);await loadChanges(context.path);},'正在处理选中的改动块…');}
+async function mutateHunk(hunk,operation){const context={id:project.id,path:file.path,mode:fileHunkData.mode,token:fileHunkData.token,hunkId:hunk.id,operation,confirmed:true};await run(async()=>{await call('git_hunk_apply',context);await loadChanges(context.path,{preserveSummary:true,followIndex:true,mode:context.mode});},'正在处理选中的改动块…');}
 function confirmDiscardHunk(hunk,selectedContext){
  if(busy)return;clearTimeout(gitPreviewTimer);const context=selectedContext??{id:project.id,path:file.path,mode:fileHunkData.mode,token:fileHunkData.token,hunkId:hunk.id,operation:'discard',confirmed:true};
  const d=gitDialogState={projectId:project.id,hunk:context,plan:{}};$('gitDialogTitle').textContent='Discard Hunk';$('gitCurrent').textContent=project.name;

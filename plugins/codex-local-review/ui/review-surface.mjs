@@ -30,16 +30,26 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
  const readWaiters=[];
  const acquireRead=()=>new Promise(resolve=>{if(activeReads<3){activeReads++;resolve();}else readWaiters.push(resolve);});
  const releaseRead=()=>{const next=readWaiters.shift();if(next)next();else activeReads--;};
- const cards=new Map(),collapsed=new Set(),options=new Map(),cache=new Map();
+ const cards=new Map(),collapsed=new Set(),options=new Map(),cache=new Map(),loads=new WeakMap();
+ let followTarget=null,interaction=0;
+ function stopFollowing(){followTarget=null;}
+ function userInteraction(){interaction++;stopFollowing();}
+ function keepTargetVisible(){
+  if(!followTarget?.isConnected||active.kind!=='summary')return;
+  const target=followTarget.getBoundingClientRect(),viewport=column.getBoundingClientRect();
+  column.scrollTop+=target.top-viewport.top-tabs.getBoundingClientRect().height-8;
+ }
+ for(const type of ['wheel','touchstart'])column.addEventListener(type,userInteraction,{capture:true,passive:true});
+ for(const type of ['pointerdown','keydown'])document.addEventListener(type,userInteraction,true);
  const key=c=>`${c.mode}:${c.path}`;
  function groups(s){
   const filter=$('fileSearch').value.toLowerCase(),items=s.files.filter(f=>!f.directory&&!f.symlink&&f.path.toLowerCase().includes(filter));
   if(s.live){return ['unstaged','staged'].filter(mode=>s.scope.mode==='working'||s.scope.mode===mode).map(mode=>({mode,title:mode==='unstaged'?'Working Directory · 未暂存':'Staged Files · 已暂存',items:items.filter(f=>mode==='unstaged'?f.canStage:f.canUnstage)}));}
   return [{mode:s.review?.mode||s.scope.mode,title:s.review?'审查快照':s.scope.mode==='files'?'本地文件':'提交变更',items}];
  }
- function summary(){active={kind:'summary'};render(true);}
- function activate(path,mode){active={kind:'file',path,mode};renderTabs();column.dataset.detailView='file';}
- function reset(toSummary=false){if(toSummary)active={kind:'summary'};signature='';generation++;observer?.disconnect();cache.clear();loadedBytes=0;}
+ function summary(){stopFollowing();active={kind:'summary'};render(true);}
+ function activate(path,mode){stopFollowing();active={kind:'file',path,mode};renderTabs();column.dataset.detailView='file';}
+ function reset(toSummary=false,preserveCache=false){stopFollowing();if(toSummary)active={kind:'summary'};signature='';generation++;observer?.disconnect();if(!preserveCache){cache.clear();loadedBytes=0;}}
  function renderTabs(){
   const s=state(),sections=groups(s);tabs.hidden=!s.project;tabs.replaceChildren();
   const add=(label,selected,fn,title)=>{const b=button(label,fn);b.setAttribute('role','tab');b.setAttribute('aria-selected',String(selected));b.title=title||label;tabs.append(b);};
@@ -49,25 +59,32 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
  function busy(value){container.querySelectorAll('[data-summary-action],[data-hunk-operation],[data-review-file]').forEach(b=>{b.disabled=value||b.dataset.ineligible==='true';});}
  function draw(card,ctx,data){
   const body=card.querySelector('.summary-file-body'),o=options.get(key(ctx))||{full:$('fullContext').checked,expanded:new Set(),page:0};options.set(key(ctx),o);
-  body.replaceChildren();if(data.error){body.append(el('p',data.error.message,'summary-error'),button('重试',()=>{cache.delete(key(ctx));void load(card,ctx);}),button('单独查看',()=>select(ctx.path,ctx.mode)));return;}
+  body.replaceChildren();if(data.error){body.append(el('p',data.error.message,'summary-error'),button('重试',()=>{cache.delete(key(ctx));void load(card,ctx);}),button('单独查看',()=>select(ctx.path,ctx.mode)));keepTargetVisible();return;}
   if(data.hunks?.notice)body.append(el('p',data.hunks.notice,'hunk-notice'));
   try{body.append(createDiffView({value:data.file,hunks:data.hunks,layout:state().layout,wrap:$('wrapCode').checked,...o,
    onComment:(side,line)=>comment(ctx,side,line),onExpand:r=>{for(let i=r.start;i<r.end;i++)o.expanded.add(i);draw(card,ctx,data);},onPage:page=>{o.page=page;draw(card,ctx,data);},onFull:full=>{o.full=full;draw(card,ctx,data);},onHunk:state().live?(h,operation)=>mutateHunk(ctx,data.hunks,h,operation):undefined
-  }));}catch(error){body.append(el('p',error.message,'summary-error'));}busy(state().busy);
+  }));}catch(error){body.append(el('p',error.message,'summary-error'));}busy(state().busy);keepTargetVisible();
  }
- async function load(card,ctx){
-  if(card.dataset.loading==='true')return;const token=generation,k=key(ctx);card.dataset.loading='true';
+ function load(card,ctx){
+  if(loads.has(card))return loads.get(card);
+  const promise=loadCard(card,ctx);loads.set(card,promise);
+  void promise.then(()=>loads.delete(card),()=>loads.delete(card));return promise;
+ }
+ async function loadCard(card,ctx){
+  const token=generation,k=key(ctx);card.dataset.loading='true';
   try{let data=cache.get(k);if(!data){await acquireRead();try{if(token!==generation||!card.isConnected)return;data=await readFile(ctx);}finally{releaseRead();}if(token!==generation)return;const bytes=new Blob([data.file.before||'',data.file.after||'']).size,limit=(state().limits?.totalMiB||50)*1024*1024;
-    if(loadedBytes+bytes>limit)throw Error('连续预览已达到本次内存上限，可单独查看这个文件。');loadedBytes+=bytes;cache.set(k,data);}
+    if(loadedBytes+bytes>limit)throw Error('连续预览已达到本次内存上限，可单独查看这个文件。');loadedBytes+=bytes;data={...data,bytes,fingerprint:ctx.record.fingerprint};cache.set(k,data);}
    if(token===generation&&card.isConnected)draw(card,ctx,data);
   }catch(error){if(token===generation&&card.isConnected)draw(card,ctx,{error});}finally{if(token===generation)delete card.dataset.loading;}
  }
  function render(force=false){
   const s=state(),owner=JSON.stringify([s.project?.id,s.review?.id||'live',s.scope]);
-  if(owner!==cacheOwner){cacheOwner=owner;generation++;observer?.disconnect();cache.clear();options.clear();collapsed.clear();loadedBytes=0;signature='';}
+  if(owner!==cacheOwner){stopFollowing();cacheOwner=owner;generation++;observer?.disconnect();cache.clear();options.clear();collapsed.clear();loadedBytes=0;signature='';}
   if(lastFull!==$('fullContext').checked){lastFull=$('fullContext').checked;for(const o of options.values())o.full=lastFull;}renderTabs();column.dataset.detailView=active.kind;if(active.kind!=='summary'||!s.project)return;
   const sections=groups(s),next=JSON.stringify([s.project.id,s.review?.id,s.review?.version,s.scope,sections.map(g=>[g.mode,g.items.map(f=>[f.path,f.fingerprint,f.digest,f.reviewed])]),s.layout,$('wrapCode').checked,$('fullContext').checked]);
   if(signature===next&&!force){busy(s.busy);return;}signature=next;generation++;observer?.disconnect();const scroll=column.scrollTop;
+  const records=new Map(sections.flatMap(g=>g.items.map(f=>[key({mode:g.mode,path:f.path}),f])));
+  for(const [k,data] of cache)if(!records.has(k)||data.fingerprint!==records.get(k).fingerprint){loadedBytes-=data.bytes;cache.delete(k);}
   container.replaceChildren();cards.clear();if(s.scope.mode==='commit'){const c=s.repository?.commits?.find(c=>c.sha===s.scope.target);if(c){const meta=el('header',undefined,'summary-commit-meta');meta.append(el('h2',c.title),el('p',`${c.author} · ${localDate(c.date)} · ${c.sha.slice(0,12)}`,'muted'));container.append(meta);}}observer=new IntersectionObserver(changes=>{for(const change of changes)if(change.isIntersecting){const c=cards.get(change.target);if(c&&!collapsed.has(key(c)))void load(change.target,c);observer.unobserve(change.target);}},{root:column,rootMargin:'400px'});
   for(const g of sections){if(!g.items.length)continue;const section=el('section',undefined,'summary-section');section.dataset.summaryMode=g.mode;const head=el('header',undefined,'summary-section-header');head.append(el('h2',`${g.title} (${g.items.length})`));
    if(s.live){const actions=el('span',undefined,'toolbar');for(const [operation,label] of g.mode==='staged'?[['unstage','Unstage All']]:[['discard','Discard All'],['stage','Stage All']]){const b=button(label,()=>bulk(operation));b.dataset.summaryAction=operation+'-all';actions.append(b);}head.append(actions);}section.append(head);
@@ -75,12 +92,12 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
     const actions=el('span',undefined,'summary-file-actions');if(s.live)for(const [operation,label] of g.mode==='staged'?[['unstage','Unstage']]:[['discard','Discard'],['stage','Stage']]){const b=button(label,()=>mutateFile(ctx,operation));b.dataset.summaryAction=operation;actions.append(b);}
     if(s.review&&s.project.isGit&&['working','unstaged'].includes(s.review.mode)&&f.reviewed){const b=button('Stage 已审阅文件',()=>stageReviewed(ctx));b.dataset.summaryAction='stage-reviewed';actions.append(b);}
     const label=el('label',undefined,'check'),check=el('input');check.type='checkbox';check.checked=Boolean(f.reviewed);check.dataset.reviewFile=f.path;check.setAttribute('aria-label',`标记已审阅 ${f.path}`);check.onchange=()=>markReviewed(ctx,check.checked);label.append(check,el('span','已审阅'));actions.append(label);bar.append(actions);card.append(bar);
-    const body=el('div',undefined,'summary-file-body');body.hidden=collapsed.has(key(ctx));body.append(el('p','正在读取差异…','summary-loading'));card.append(body);section.append(card);cards.set(card,ctx);if(!body.hidden)observer.observe(card);
+    const body=el('div',undefined,'summary-file-body');body.hidden=collapsed.has(key(ctx));body.append(el('p','正在读取差异…','summary-loading'));card.append(body);section.append(card);cards.set(card,ctx);if(!body.hidden){const data=cache.get(key(ctx));if(data)draw(card,ctx,data);else observer.observe(card);}
    }container.append(section);
   }
   if(!container.childElementCount){const empty=el('div',undefined,'empty-state');empty.append(el('h2',s.scope.mode==='working'?'工作区干净':'当前范围没有文件差异'),el('p','切换范围或刷新，查看最新内容。'));container.append(empty);}
   column.scrollTop=scroll;busy(s.busy);
  }
- async function reveal(path,mode){if(active.kind!=='summary')return;const entry=[...cards].find(([,ctx])=>ctx.path===path&&ctx.mode===mode)||[...cards].find(([,ctx])=>ctx.path===path);if(!entry)return;const [card,ctx]=entry;card.scrollIntoView({block:'start'});card.querySelector('[data-collapse-file]')?.focus({preventScroll:true});if(!collapsed.has(key(ctx)))await load(card,ctx);}
- return {render,reset,summary,activate,reveal,isSummary:()=>active.kind==='summary',busy};
+ async function reveal(path,mode,expectedInteraction=interaction){if(active.kind!=='summary'||expectedInteraction!==interaction)return;const entry=[...cards].find(([,ctx])=>ctx.path===path&&ctx.mode===mode)||[...cards].find(([,ctx])=>ctx.path===path);if(!entry)return;const [card,ctx]=entry,token=generation;followTarget=card;card.querySelector('[data-collapse-file]')?.focus({preventScroll:true});keepTargetVisible();if(!collapsed.has(key(ctx)))await load(card,ctx);if(token===generation&&expectedInteraction===interaction)keepTargetVisible();}
+ return {render,reset,summary,activate,reveal,interactionToken:()=>interaction,isSummary:()=>active.kind==='summary',busy};
 }
