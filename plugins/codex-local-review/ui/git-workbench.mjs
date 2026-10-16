@@ -1,15 +1,15 @@
 // UI adapter for repository commands. No shell commands or patch construction here.
-let gitStatus=null,gitDialogState=null;
-async function refreshGitStatus(){gitStatus=null;if(project?.isGit){try{gitStatus=await call('git_status',{id:project.id});}catch(e){gitStatus={error:e.message,branch:repository?.branch??'',remotes:[],branches:[],files:[]};}}updateGitWorkbench();}
-function updateGitWorkbench(){
+let gitStatus=null,gitDialogState=null,gitStatusSequence=0;
+async function refreshGitStatus(){const selected=project,request=++gitStatusSequence;gitStatus=null;if(selected?.isGit){try{const result=await call('git_status',{id:selected.id});if(request!==gitStatusSequence||project!==selected)return;gitStatus=result;}catch(e){if(request!==gitStatusSequence||project!==selected)return;gitStatus={error:e.message,branch:repository?.branch??'',remotes:[],branches:[],files:[]};}}updateGitWorkbench();}
+function updateGitWorkbench(){const working=busy||fileLoading;
  const enabled=Boolean(project?.isGit),live=liveGit();$('gitCommandBar').hidden=!enabled;$('currentBranch').textContent=gitStatus?.branch||repository?.branch||'分离 HEAD';$('syncStatus').textContent=gitStatus?.upstream?`${gitStatus.upstream.remote}/${gitStatus.upstream.branch} · ↓${gitStatus.behind??'?'} ↑${gitStatus.ahead??'?'}`:gitStatus?.error||'未设置 upstream';
- for(const id of ['switchBranch','gitFetch','gitPull','gitPush','pullOptions','pushOptions'])$(id).disabled=busy||!enabled||!gitStatus||Boolean(gitStatus.error);
- $('gitAll').hidden=!live;$('stageAll').disabled=busy||!gitStatus?.files?.some(f=>f.canStage);$('unstageAll').disabled=busy||!gitStatus?.files?.some(f=>f.canUnstage);$('discardAll').disabled=$('stageAll').disabled;
- const current=files.find(f=>f.path===(file?.path??failedFile?.path));$('discardFile').hidden=!live||!current?.canStage||fileMode==='staged';$('discardFile').disabled=busy;
+ for(const id of ['switchBranch','gitFetch','gitPull','gitPush','pullOptions','pushOptions'])$(id).disabled=working||!enabled||!gitStatus||Boolean(gitStatus.error);
+ $('gitAll').hidden=!live;$('stageAll').disabled=working||!gitStatus?.files?.some(f=>f.canStage);$('unstageAll').disabled=working||!gitStatus?.files?.some(f=>f.canUnstage);$('discardAll').disabled=$('stageAll').disabled;
+ const current=files.find(f=>f.path===(file?.path??failedFile?.path));$('discardFile').hidden=!live||!current?.canStage||fileMode==='staged';$('discardFile').disabled=working;
  $('hunkNotice').textContent=live?(fileHunkData?.notice??''):'';$('hunkNotice').hidden=!$('hunkNotice').textContent;
- document.querySelectorAll('[data-hunk-operation]').forEach(button=>button.disabled=busy||!live);
- for(const input of document.querySelectorAll('#gitOperationForm input,#gitOperationForm select,#gitPreviewOperation,#gitCreateBranch,#gitDialog [data-close]'))input.disabled=busy;
- $('gitConfirmOperation').disabled=busy||!gitDialogState?.plan;
+ document.querySelectorAll('[data-hunk-operation]').forEach(button=>button.disabled=working||!live);
+ for(const input of document.querySelectorAll('#gitOperationForm input,#gitOperationForm select,#gitPreviewOperation,#gitCreateBranch,#gitDialog [data-close]'))input.disabled=working;
+ $('gitConfirmOperation').disabled=working||!gitDialogState?.plan;
 }
 async function refreshAfterGit(preferred=file?.path??failedFile?.path){repository=(await call('project_open',{id:project.id})).repository;review=null;tab='changes';scope={mode:'working'};await loadChanges(preferred,{preserveSummary:true});renderProjects();}
 async function stageAll(operation){await run(async()=>{const state=await call('git_status',{id:project.id}),records=state.files.filter(f=>operation==='stage'?f.canStage:f.canUnstage);if(!records.length)return;await call('git_index_change',{id:project.id,mode:'working',operation,files:records.map(({path,fingerprint})=>({path,fingerprint}))});await refreshAfterGit();},operation==='stage'?'正在暂存全部文件…':'正在取消全部暂存…');}
