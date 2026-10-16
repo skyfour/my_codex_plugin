@@ -1,6 +1,6 @@
 {
   "name": "codex-local-review",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "多项目本地代码审查、Stage / Unstage、提交历史、准确差异与行内评论。",
   "author": {
     "name": "Local developer"

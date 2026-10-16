@@ -22,6 +22,8 @@
 
 - `npm run test:local-review-ui`：本地人工审查原生宿主模拟，覆盖多项目打开/切换/恢复、目录浏览与批量添加、对齐差异、语法高亮、提交历史、输入焦点、快照、行内评论、导出和错误恢复，以及长名称、空状态、深浅主题、Stage/Unstage 和可配置大文件上限，需要 Chrome。
 
+- 修改代码审查 UI、Git 刷新或异步状态时，发布前必须运行完整 `npm run test:local-review-ui`：其中暂存定位按 rAF 帧采样位置并核对 DOM 身份；性能检查无变化缓存的重复计算/读取；连续操作使用门控 RPC 和真实指针事件。不能只以最终 `aria-busy=false` 判断流畅。Summary 预览独立懒加载，内容断言须等待对应可见表格；测试截图同时设置 `UI_AUDIT_DIR` 与 `CODEX_UI_SCREENSHOT_DIR` 可集中到同一临时目录。
+
 - MCP 内联第三方 JS 时，HTML 占位替换使用 `replace(marker, () => source)`，避免库源码中的 `$&` 被当作替换标记。异步操作的按钮状态按当前界面重算，不恢复操作开始前的全局 disabled 快照。
 - 原生宿主浏览器测试使用 localhost 安全上下文，保留 `crypto.randomUUID` 等宿主 API。重绘后的焦点身份包含表单/来源泳道和控件身份，不能仅用重复的 input name。
 

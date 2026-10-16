@@ -1,4 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtemp,realpath,writeFile,readFile,rm,chmod} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';import {execFileSync} from 'node:child_process';import {prepareCommit,commitStaged} from '../src/git-commit.mjs';
+import {createServer} from '../servers/server.mjs';
 async function fixture(t,{unborn=false}={}){const root=await realpath(await mkdtemp(join(tmpdir(),'commit-test-')));t.after(()=>rm(root,{recursive:true,force:true}));const git=(...args)=>execFileSync('git',['-C',root,...args],{encoding:'utf8'}).trim();git('init','-q');git('config','user.email','test@example.invalid');git('config','user.name','Test');const write=(name,text)=>writeFile(join(root,name),text);if(!unborn){await write('tracked','initial');git('add','.');git('commit','-qm','initial');}await write('tracked','staged');git('add','tracked');await write('tracked','unstaged');await write('other','untracked');return {root,git,write};}
 test('commit uses reviewed index, exact keyword message, leaves unstaged and untracked content',async t=>{const {root,git}=await fixture(t);const prepared=await prepareCommit(root),message='fix: example\n\n--task=123@tapd-100 --user=test Title';assert.deepEqual(prepared.files.map(f=>f.path),['tracked']);const result=await commitStaged(root,{token:prepared.token,message});assert.equal(git('show','HEAD:tracked'),'staged');assert.equal(await readFile(join(root,'tracked'),'utf8'),'unstaged');assert.equal(await readFile(join(root,'other'),'utf8'),'untracked');assert.equal(git('log','-1','--format=%B'),message);assert.equal(git('rev-parse','HEAD'),result.commit);await assert.rejects(commitStaged(root,{token:prepared.token,message}),/暂存|变化/);});
 test('changed index, branch and HEAD reject old confirmation',async t=>{const {root,git,write}=await fixture(t);const first=await prepareCommit(root),head=git('rev-parse','HEAD');await write('other','next');git('add','other');await assert.rejects(commitStaged(root,{token:first.token,message:'wrong'}),/变化/);assert.equal(git('rev-parse','HEAD'),head);const second=await prepareCommit(root);git('switch','-qc','another');await assert.rejects(commitStaged(root,{token:second.token,message:'wrong'}),/变化/);});
@@ -9,3 +10,16 @@ test('detached HEAD and ongoing operations cannot be committed by generic flow',
 test('confirmation includes externally staged gitlinks instead of silently omitting them',async t=>{const {root,git}=await fixture(t);git('update-index','--add','--cacheinfo','160000,'+git('rev-parse','HEAD')+',module');const p=await prepareCommit(root);assert.deepEqual(p.files.map(f=>f.path).sort(),['module','tracked']);});
 
 test('inline composer can prepare an empty index while commit remains rejected',async t=>{const {root,git}=await fixture(t);git('reset','-q','HEAD');const p=await prepareCommit(root,{allowEmpty:true});assert.equal(p.token,null);assert.deepEqual(p.files,[]);await assert.rejects(commitStaged(root,{token:p.token,message:'no changes'}),/没有已暂存/);});
+
+test('index-only composer refresh avoids task provider and still validates current index',async t=>{
+ const {root,git,write}=await fixture(t),dir=await mkdtemp(join(tmpdir(),'composer-refresh-'));let requests=0;
+ const app=await createServer({dir,taskContexts:{listTasks:async()=>{requests++;return {tasks:[],notice:'synthetic provider'};}}});
+ t.after(async()=>{await app.server.close();app.store.close();await rm(dir,{recursive:true,force:true});});
+ const project=await app.projects.open(root),prepare=app.actions.get('commit_prepare');
+ const initial=await prepare({id:project.id});assert.equal(initial.isError,undefined);assert.equal(requests,1);
+ await write('other','new staged content');git('add','other');
+ const refreshed=await prepare({id:project.id,includeTasks:false});assert.equal(refreshed.isError,undefined);assert.equal(requests,1);
+ assert.equal(refreshed.structuredContent.tasks,undefined);assert.notEqual(refreshed.structuredContent.token,initial.structuredContent.token);
+ assert.deepEqual(refreshed.structuredContent.files.map(f=>f.path).sort(),['other','tracked']);
+ assert.equal((await prepare({id:project.id,includeTasks:'false'})).isError,true);assert.equal(requests,1);
+});
