@@ -11,7 +11,7 @@
 | 插件 | 可以做什么 | 当前版本 |
 | --- | --- | --- |
 | [任务看板](plugins/codex-task-panel/README.md) | 从 TAPD 选择导入任务，安排泳道进度，关联 Codex 会话 | 0.4.7 |
-| [API 调试台](plugins/codex-api-client/README.md) | 管理 HTTP 请求、集合与环境，导入 Postman / cURL，执行脚本与断言 | 0.1.1 |
+| [API 调试台](plugins/codex-api-client/README.md) | 管理 HTTP 请求、集合与环境，整体备份迁移，执行脚本与断言 | 0.2.0 |
 | [本地代码审查](plugins/codex-local-review/README.md) | 浏览差异、添加审阅评论，以及暂存、提交、拉取和推送 Git 改动 | 0.5.3 |
 | [DBX 数据库工作台](plugins/dbx/README.md) | 在 Codex 内使用 DBX 工作台，管理连接、查询数据库 | 0.6.39 |
 
@@ -121,7 +121,7 @@ npm run install:local-review
 插件工作数据保存在本机，安装和更新不会自动跨设备同步任务、会话、请求集合、环境或凭据。新设备按[快速开始](#快速开始)安装，再配置各插件。
 
 - **任务看板**：每台设备单独配置 TAPD，可从相同来源重新导入任务；本地泳道和 Codex 会话关联各自独立。
-- **API 调试台**：集合与环境可用 Postman 导出 / 导入迁移；敏感变量和 Cookie 值保存在 macOS 钥匙串，新设备需要重新配置。
+- **API 调试台**：在集合列表点击「导出全部」，可将所有集合、环境、全局变量及各级 API 脚本保存为一个工作区备份，再通过「导入」迁移；也支持 Postman 导入 / 导出。敏感变量和 Cookie 值保存在 macOS 钥匙串，新设备需要重新配置。详见[整体导入与导出](plugins/codex-api-client/README.md#整体导入与导出)。
 - **本地代码审查与 DBX**：审查记录、数据库连接配置和历史保留在各自的本地数据目录。
 
 <details>

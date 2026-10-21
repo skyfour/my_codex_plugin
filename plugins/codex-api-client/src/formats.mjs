@@ -1,6 +1,7 @@
 import { parse as shellParse } from 'shell-quote';
 import { parse as csvParse } from 'csv-parse/sync';
 import { normalizeCollection } from './collections.mjs';
+import {WORKSPACE_FORMAT,TRANSFER_LIMIT,parseWorkspace} from './workspace-transfer.mjs';
 
 export function warningsFor(value) {
   const warnings = new Set();
@@ -18,10 +19,12 @@ export function warningsFor(value) {
   visit(value); return [...warnings];
 }
 export function importDocument(text) {
+  if(Buffer.byteLength(text,'utf8')>TRANSFER_LIMIT)throw new Error('IMPORT: 文件超过 20 MB');
   text = text.trim();
   if (text.startsWith('curl ')) return { kind: 'collection', data: normalizeCollection({ info: { name: 'cURL 导入' }, item: [curlRequest(text)] }), warnings: [] };
   const data = JSON.parse(text);
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('IMPORT: 需要集合或环境对象');
+  if(data.format===WORKSPACE_FORMAT)return parseWorkspace(data);
   if (data.info && Array.isArray(data.item)) {
     if (data.info.schema && !/collection\/v2\.1\.0\//.test(data.info.schema)) throw new Error('IMPORT: 只支持 Postman Collection v2.1');
     return { kind: 'collection', data: normalizeCollection(data), warnings: warningsFor(data) };

@@ -60,3 +60,107 @@ test('login script stores environment token and next request uses it after reope
 test('invalid import shows an error without replacing drafts and history of deleted collections opens',async({page})=>{const doc=await setup(page);await side(page,'A').last().click();await send(page,'/history-proof');await page.getByLabel('URL',{exact:true}).fill(echo+'/unsaved-import');await page.getByRole('button',{name:'导入',exact:true}).click();await page.getByLabel('导入内容').fill('{broken json');await page.getByRole('button',{name:'确认导入',exact:true}).click();await expect(page.locator('.modal-error')).toBeVisible();await page.keyboard.press('Escape');await expect(page.getByLabel('URL',{exact:true})).toHaveValue(echo+'/unsaved-import');const stored=await api(page,'api_document_get',{kind:'collection',id:doc.id});await api(page,'api_document_delete',{kind:'collection',id:doc.id,revision:stored.revision});await page.getByLabel('刷新工作区').click();await page.getByRole('button',{name:'历史',exact:true}).click();await page.locator('.history-row').first().click();await expect(page.getByRole('dialog',{name:'历史运行结果'})).toContainText('/history-proof');await page.keyboard.press('Escape');});
 
 test('upload finishing after tab switches updates only its original row',async({page})=>{await setup(page);await side(page,'A').last().click();await nav(page,'请求体').click();await page.getByLabel('请求体类型').selectOption('formdata');await row(page,'upload-key','');await page.getByLabel('类型 1',{exact:true}).selectOption('file');let release!:()=>void,started!:()=>void;const gate=new Promise<void>(r=>release=r),observed=new Promise<void>(r=>started=r);await page.route('**/api/api_file_upload',async route=>{const response=await route.fetch();started();await gate;await route.fulfill({response});});await page.getByLabel('上传文件 1',{exact:true}).setInputFiles({name:'switch.txt',mimeType:'text/plain',buffer:Buffer.from('switch upload')});await observed;await side(page,'B').last().click();await page.getByLabel('URL',{exact:true}).fill(echo+'/keep-b-upload');await side(page,'A').last().click();await nav(page,'请求体').click();await page.getByLabel('名称 1',{exact:true}).fill('keep-row-name');release();await expect(page.locator('.file-picker')).toContainText('switch.txt');await expect(page.getByLabel('名称 1',{exact:true})).toHaveValue('keep-row-name');await side(page,'B').last().click();await expect(page.getByLabel('URL',{exact:true})).toHaveValue(echo+'/keep-b-upload');});
+
+test('URL variables stay colored while editing scrolling and switching themes',async({page})=>{
+  await setup(page);await side(page,'A').last().click();
+  const input=page.getByLabel('URL',{exact:true}),mirror=page.locator('.url-input-highlight'),variables=mirror.locator('.url-variable');
+  const value='{{eurekaDomain}}/eureka/apps?name={{服务名}}&literal=<script>';
+  await input.fill(value);await expect(input).toHaveValue(value);
+  await expect(variables).toHaveText(['{{eurekaDomain}}','{{服务名}}']);
+  await expect(mirror).toHaveText(value);await expect(page.locator('.url-input script')).toHaveCount(0);
+  for(const theme of ['light','dark']){
+    const colors=await variables.first().evaluate(el=>({variable:getComputedStyle(el).color,plain:getComputedStyle(el.parentElement!).color}));
+    expect(colors.variable).not.toBe(colors.plain);
+    if(theme==='light')await page.getByLabel('切换主题').click();
+  }
+  await page.setViewportSize({width:620,height:700});
+  await input.fill('{{host}}/'+('long-path/'.repeat(25))+'{{last}}');await input.press('End');await input.press('ArrowLeft');
+  await expect.poll(()=>input.evaluate(el=>(el as HTMLInputElement).scrollLeft)).toBeGreaterThan(0);
+  await expect.poll(async()=>{const scroll=await input.evaluate(el=>(el as HTMLInputElement).scrollLeft);return mirror.locator(':scope > span').evaluate((el,left)=>el.style.transform===`translateX(${-left}px)`,scroll);}).toBe(true);
+  await input.press('Home');await input.press('X');await expect(input).toHaveValue(/^X\{\{host\}\}/);
+  await input.fill('{{incomplete');await expect(variables).toHaveCount(0);await expect(mirror).toHaveText('{{incomplete');
+});
+
+test('JSON responses have typed syntax colors while raw search and non-JSON remain intact',async({page})=>{
+  await setup(page);await side(page,'A').last().click();
+  let body=JSON.stringify({message:'你好 "JSON" <script>',count:42,enabled:true,missing:null,nested:{items:[false,1.5]}});
+  await page.route('**/api/api_run_result',async route=>{const response=await route.fetch(),result=await response.json();for(const item of result.responses||[])item.body=body;await route.fulfill({response,json:result});});
+  await send(page,'/syntax-colors');
+  const output=page.getByTestId('response-body');
+  await expect(output).toHaveText(JSON.stringify(JSON.parse(body),null,2));
+  await expect(output.locator('.tok-propertyName').first()).toHaveText('"message"');
+  await expect(output.locator('.tok-string').first()).toContainText('你好');
+  await expect(output.locator('.tok-number').first()).toHaveText('42');
+  await expect(output.locator('.tok-bool').first()).toHaveText('true');
+  await expect(output.locator('.tok-keyword').first()).toHaveText('null');
+  await expect(output.locator('script')).toHaveCount(0);
+  for(const theme of ['light','dark']){
+    const colors=await output.evaluate(el=>['.tok-propertyName','.tok-string','.tok-number','.tok-bool'].map(selector=>getComputedStyle(el.querySelector(selector)!).color));
+    expect(new Set(colors).size).toBe(4);
+    await page.screenshot({path:`/tmp/api-client-syntax-${theme}.png`});
+    if(theme==='light')await page.getByLabel('切换主题').click();
+  }
+  const search=page.getByLabel('搜索响应');await search.fill('"count": 42');await expect(output.locator('mark')).toHaveText('"count": 42');
+  await expect(output).toHaveText(JSON.stringify(JSON.parse(body),null,2));
+  await search.fill('');await page.locator('.body-toolbar').getByRole('button',{name:'原始',exact:true}).click();
+  await expect(output).toHaveText(body);await expect(output.locator('[class^=tok-]')).toHaveCount(0);
+  await page.locator('.body-toolbar').getByRole('button',{name:'格式化',exact:true}).click();
+  body=JSON.stringify({items:Array.from({length:5000},()=>true)});await send(page,'/many-search-matches');await search.fill('true');await expect(output.locator('mark')).toHaveCount(5000);await expect(output).toHaveText(JSON.stringify(JSON.parse(body),null,2));await search.fill('');
+  body='<html>plain response & {{literal}}</html>';await send(page,'/plain-response');await expect(output).toHaveText(body);await expect(output.locator('span')).toHaveCount(0);
+});
+
+test('response toolbar stays fixed while long bodies scroll in both themes and narrow panels',async({page})=>{
+  await setup(page);await side(page,'A').last().click();
+  const body=JSON.stringify({items:Array.from({length:200},(_,index)=>({index,name:'长响应第 '+index+' 行'}))});
+  await page.route('**/api/api_run_result',async route=>{const response=await route.fetch(),result=await response.json();for(const item of result.responses||[])item.body=body;await route.fulfill({response,json:result});});
+  await send(page,'/long-response');
+  const output=page.getByTestId('response-body'),toolbar=page.locator('.body-toolbar');
+  for(const width of [1440,620]){
+    await page.setViewportSize({width,height:850});
+    for(const theme of ['light','dark']){
+      const before=await toolbar.boundingBox();await output.hover({position:{x:20,y:20}});await page.mouse.wheel(0,800);
+      await expect.poll(()=>output.evaluate(el=>el.scrollTop)).toBeGreaterThan(0);
+      const after=await toolbar.boundingBox();expect(after!.y).toBeCloseTo(before!.y,1);
+      await page.screenshot({path:`/tmp/api-fixed-toolbar-${width}-${theme}.png`});
+      expect(await page.locator('.response-content').evaluate(el=>el.scrollTop)).toBe(0);
+      await page.getByLabel('搜索响应').fill('长响应第 199 行');await expect(output.locator('mark')).toHaveCount(1);
+      const download=page.waitForEvent('download');await toolbar.getByRole('button',{name:'保存响应',exact:true}).click();expect((await download).suggestedFilename()).toBe('response.bin');
+      await toolbar.getByRole('button',{name:'原始',exact:true}).click();await expect(output).toHaveText(body);
+      await toolbar.getByRole('button',{name:'格式化',exact:true}).click();await expect(output).toContainText('长响应第 199 行');
+      await page.getByLabel('搜索响应').fill('');await page.getByLabel('切换主题').click();
+    }
+  }
+});
+
+test('URL variable colors reflect selected environment and hover shows resolved masked or missing values',async({page})=>{
+ await setup(page);
+ const env=await api(page,'api_document_put',{kind:'environment',revision:0,data:{name:'变量提示环境',values:[{key:'present',value:'https://dev.example'},{key:'empty',value:''},{key:'disabled',value:'ignored',disabled:true},{key:'masked',value:'test-value-must-not-show'}]}});
+ await page.route('**/api/api_workspace_state',async route=>{const response=await route.fetch(),state=await response.json();for(const e of state.environments)if(e.id===env.id)e.data.values.find((v:any)=>v.key==='masked').sensitive=true;await route.fulfill({response,json:state});});
+ await page.getByLabel('刷新工作区').click();await side(page,'A').last().click();await page.getByRole('button',{name:'选择环境'}).click();await page.getByRole('option',{name:/变量提示环境/}).click();
+ const input=page.getByLabel('URL',{exact:true});await input.fill('{{present}}/{{missing}}/{{empty}}/{{disabled}}/{{masked}}');
+ const vars=page.locator('.url-variable');await expect(vars.filter({hasText:'{{present}}'})).toHaveClass(/is-resolved/);await expect(vars.filter({hasText:'{{missing}}'})).toHaveClass(/is-unresolved/);await expect(vars.filter({hasText:'{{empty}}'})).toHaveClass(/is-resolved/);await expect(vars.filter({hasText:'{{disabled}}'})).toHaveClass(/is-unresolved/);
+ await input.press('Home');
+ for(const [key,value]of [['present','https://dev.example'],['missing','未设置'],['empty','空字符串'],['masked','••••••••']]){
+  const box=await vars.filter({hasText:'{{'+key+'}}'}).boundingBox();await page.mouse.move(box!.x+4,box!.y+box!.height/2);await expect(page.getByRole('tooltip')).toContainText(value);await expect(page.getByRole('tooltip')).not.toContainText('test-value-must-not-show');
+ }
+ await input.focus();await input.press('Home');await input.press('ArrowRight');await expect(page.getByRole('tooltip')).toContainText('https://dev.example');await input.press('Escape');await expect(page.getByRole('tooltip')).toHaveCount(0);
+ await page.getByRole('button',{name:'选择环境'}).click();await page.getByRole('option',{name:/无环境/}).click();await expect(vars.filter({hasText:'{{present}}'})).toHaveClass(/is-unresolved/);
+});
+
+test('variable tooltips refresh saved changes even when clean environment and collection tabs stay open',async({page})=>{
+ await setup(page);const env=await api(page,'api_document_put',{kind:'environment',revision:0,data:{name:'脚本更新环境',values:[{key:'present',value:'old-value'}]}});await page.getByLabel('刷新工作区').click();
+ await page.getByRole('button',{name:'选择环境'}).click();await page.getByRole('option',{name:/脚本更新环境/}).click();await page.getByRole('button',{name:'选择环境'}).click();await page.getByRole('button',{name:'编辑环境 脚本更新环境',exact:true}).click();
+ await side(page,'A').last().click();await nav(page,'脚本').click();await page.getByRole('button',{name:'请求前',exact:true}).click();await cm(page).fill('pm.environment.set("present","new-value");pm.environment.set("created","created-value");');await send(page,'/updated-variables');
+ await expect.poll(async()=>{const state=await api(page,'api_workspace_state');return state.environments.find((e:any)=>e.id===env.id).data.values.find((v:any)=>v.key==='created')?.value;}).toBe('created-value');
+ const workspace=await api(page,'api_workspace_state'),collection=workspace.collections.find((c:any)=>c.data.info.name===names.get(page));await api(page,'api_document_put',{kind:'collection',id:collection.id,revision:collection.revision,data:{...collection.data,info:{...collection.data.info,name:collection.data.info.name+'更新'},variable:[{key:'freshCollection',value:'collection-after'}]}});await page.getByLabel('刷新工作区').click();await expect(page.locator('.collection-head').getByRole('button',{name:collection.data.info.name+'更新',exact:true})).toBeVisible();
+ const input=page.getByLabel('URL',{exact:true});await input.fill('{{present}}/{{created}}/{{freshCollection}}');await expect(page.locator('.url-variable.is-resolved')).toHaveCount(3);await input.press('Home');await input.press('ArrowRight');await expect(page.getByRole('tooltip')).toContainText('new-value');
+});
+
+
+test('workspace refresh removes externally deleted clean request tabs while preserving dirty drafts',async({page})=>{
+ const doc=await setup(page);await side(page,'A').last().click();
+ await api(page,'api_item_edit',{collectionId:doc.id,revision:doc.revision,operation:'delete',itemId:doc.data.item[0].item[0].item[0].id});await page.getByLabel('刷新工作区').click();
+ await expect(page.getByRole('button',{name:'关闭 A',exact:true})).toHaveCount(0);await nav(page,'概览').click();await expect(page.getByLabel('名称',{exact:true})).toHaveValue(doc.data.info.name);
+ await side(page,'B').last().click();await page.getByLabel('URL',{exact:true}).fill(echo+'/keep-deleted-draft');const fresh=await api(page,'api_document_get',{kind:'collection',id:doc.id});await api(page,'api_item_edit',{collectionId:doc.id,revision:fresh.revision,operation:'delete',itemId:fresh.data.item[1].id});await page.getByLabel('刷新工作区').click();
+ await expect(page.getByLabel('URL',{exact:true})).toHaveValue(echo+'/keep-deleted-draft');await expect(page.getByText('未保存',{exact:true})).toBeVisible();
+});
