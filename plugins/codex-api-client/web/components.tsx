@@ -2,14 +2,17 @@ import {useEffect,useRef,type ReactNode} from 'react';
 export type Row={id?:string,key:string,value?:string,type?:string,disabled?:boolean,secretRef?:string,src?:string,description?:string};
 export function Rows({rows,onChange,variables=false,files=false,onUpload,onUploaded}:{rows:Row[],onChange:(rows:Row[])=>void,variables?:boolean,files?:boolean,onUpload?:(file:File)=>Promise<string>,onUploaded?:(id:string,path:string)=>void}){
   const latest=useRef({rows,onChange});latest.current={rows,onChange};
-  const change=(index:number,patch:Partial<Row>)=>latest.current.onChange(latest.current.rows.map((v,i)=>i===index?{...v,...patch}:v));
-  return <div className="rows"><div className="row-head"><span/><span>名称</span><span>值</span><span>类型</span><span/></div>{rows.map((r,i)=><div className="kv-row" key={i}>
-    <input aria-label={`启用 ${r.key||i+1}`} type="checkbox" checked={!r.disabled} onChange={e=>change(i,{disabled:!e.target.checked})}/>
+  const root=useRef<HTMLDivElement>(null),focusRow=useRef<number|null>(null);
+  useEffect(()=>{if(focusRow.current!==null){root.current?.querySelector<HTMLInputElement>(`[aria-label="名称 ${focusRow.current+1}"]`)?.focus();focusRow.current=null;}},[rows.length]);
+  const add=()=>{focusRow.current=latest.current.rows.length;latest.current.onChange([...latest.current.rows,{key:'',value:'',type:'text'}]);};
+  const change=(index:number,patch:Partial<Row>)=>{const current=latest.current.rows;latest.current.onChange(index<current.length?current.map((v,i)=>i===index?{...v,...patch}:v):[...current,{key:'',value:'',type:'text',...patch}]);};
+  return <div ref={root} className={'rows '+(!variables&&!files?'rows-basic':'')}><div className="row-head"><span/><span>名称</span><span>值</span><span>类型</span><span/></div>{[...rows,{key:'',value:'',type:'text'}].map((r,i)=><div className={i<rows.length?'kv-row':'row-draft'} key={i} onKeyDown={e=>{if(e.key==='Enter'&&!e.metaKey&&!e.ctrlKey&&!e.nativeEvent.isComposing&&e.target instanceof HTMLInputElement&&['text','password'].includes(e.target.type)&&i<latest.current.rows.length){e.preventDefault();add();}}}>
+    {i<rows.length?<input aria-label={`启用 ${r.key||i+1}`} type="checkbox" checked={!r.disabled} onChange={e=>change(i,{disabled:!e.target.checked})}/>:<span/>}
     <input aria-label={`名称 ${i+1}`} placeholder="Key" value={r.key} onChange={e=>change(i,{key:e.target.value})}/>
     {files&&r.type==='file'?<label className="file-picker">{r.src?.split('/').at(-1)||'选择文件'}<input type="file" aria-label={`上传文件 ${i+1}`} onChange={async e=>{const f=e.target.files?.[0];if(f&&onUpload){const id=r.id||crypto.randomUUID();change(i,{id});const path=await onUpload(f);if(path){if(onUploaded)onUploaded(id,path);else{const index=latest.current.rows.findIndex(row=>row.id===id);if(index>=0)change(index,{src:path});}}}}}/></label>:<input aria-label={`值 ${i+1}`} placeholder={variables?'值或 {{变量}}':'Value / {{variable}}'} type={r.type==='secret'?'password':'text'} value={r.value??''} onChange={e=>change(i,{value:e.target.value})}/>}
     {variables||files?<select aria-label={`类型 ${i+1}`} value={r.type||'text'} onChange={e=>change(i,{type:e.target.value,secretRef:undefined,value:r.value==='••••••••'?'':r.value})}><option value="text">文本</option>{variables&&<option value="secret">敏感</option>}{files&&<option value="file">文件</option>}</select>:<span/>}
-    <button className="icon-button" aria-label={`删除行 ${i+1}`} onClick={()=>onChange(rows.filter((_,n)=>n!==i))}>×</button>
-  </div>)}<button className="text-button" onClick={()=>onChange([...rows,{key:'',value:'',type:'text'}])}>＋ 添加一行</button></div>;
+    {i<rows.length?<button className="icon-button" aria-label={`删除行 ${i+1}`} onClick={()=>onChange(rows.filter((_,n)=>n!==i))}>×</button>:<span/>}
+  </div>)}<button className="text-button" onClick={add}>＋ 添加一行</button></div>;
 }
 export function Modal({title,children,onClose,wide=false,className=''}:{title:string,children:ReactNode,onClose:()=>void,wide?:boolean,className?:string}){
   const ref=useRef<HTMLElement>(null),close=useRef(onClose);close.current=onClose;
