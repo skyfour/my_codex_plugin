@@ -29,38 +29,46 @@ export class Store {
     const rows = this.db.prepare('SELECT * FROM documents WHERE kind=? ORDER BY updatedAt DESC').all(kind);
     return Promise.all(rows.map(r => this.view(r)));
   }
-  async put(kind, id, data, expectedRevision) {
-    // All session cookies are credentials; never persist their values in SQLite.
-    if (kind === 'cookies') data={...data,cookies:(data.cookies||[]).map(c=>({...c,type:'secret'}))};
-    const original = this.row(kind, id);
-    if ((original?.revision ?? 0) !== expectedRevision) throw new Error('CONFLICT: 内容已在其他会话更新，请重新加载后保存');
-    // Allocate a new immutable key for each value, so a losing concurrent writer cannot alter an existing secret.
-    const owned = new Set();
-    if (original) await transformSecrets(JSON.parse(original.data), v => { if (v.secretRef) owned.add(v.secretRef); return v; });
-    const created = [];
+  async put(kind,id,data,expectedRevision) {
+    return (await this.putMany([{kind,id,data,expectedRevision}]))[0];
+  }
+  async putMany(documents) {
+    const created=[],pending=[],prepared=[],keys=new Set();
     try {
-      const stored = await transformSecrets(structuredClone(data), async v => {
-        if (v.value === MASK) {
-          if (!owned.has(v.secretRef)) throw new Error('INVALID_SECRET: 无法复用其他文档的凭据引用');
-        } else {
-          v.secretRef = randomUUID();
-          await this.secrets.set(v.secretRef, v.value ?? ''); created.push(v.secretRef);
-        }
-        delete v.value; v.type = 'secret'; return v;
-      });
+      for(let {kind,id,data,expectedRevision} of documents){
+        const key=JSON.stringify([kind,id]);if(keys.has(key))throw new Error('INVALID_DOCUMENT: 重复文档');keys.add(key);
+        if(kind==='cookies')data={...data,cookies:(data.cookies||[]).map(c=>({...c,type:'secret'}))};
+        const original=this.row(kind,id);
+        if((original?.revision??0)!==expectedRevision)throw new Error('CONFLICT: 内容已在其他会话更新，请重新加载后保存');
+        const owned=new Set();
+        if(original)await transformSecrets(JSON.parse(original.data),v=>{if(v.secretRef)owned.add(v.secretRef);return v;});
+        const stored=await transformSecrets(structuredClone(data),async v=>{
+          if(v.value===MASK){if(!owned.has(v.secretRef))throw new Error('INVALID_SECRET: 无法复用其他文档的凭据引用');}
+          else {
+            v.secretRef=randomUUID();created.push(v.secretRef);
+            const operation=this.secrets.set(v.secretRef,v.value??'');pending.push(operation);await operation;
+          }
+          delete v.value;v.type='secret';return v;
+        });
+        prepared.push({kind,id,data:JSON.stringify(stored),expectedRevision});
+      }
+      // Prepare Keychain values first; the SQLite transaction contains only synchronous writes.
       this.db.exec('BEGIN IMMEDIATE');
       try {
-        if ((this.row(kind, id)?.revision ?? 0) !== expectedRevision) throw new Error('CONFLICT: 内容已更新');
-        this.db.prepare(`INSERT INTO documents VALUES(?,?,?,?,?) ON CONFLICT(kind,id)
-          DO UPDATE SET revision=excluded.revision,data=excluded.data,updatedAt=excluded.updatedAt`)
-          .run(kind, id, expectedRevision + 1, JSON.stringify(stored), new Date().toISOString());
+        for(const {kind,id,data,expectedRevision} of prepared){
+          if((this.row(kind,id)?.revision??0)!==expectedRevision)throw new Error('CONFLICT: 内容已更新');
+          this.db.prepare(`INSERT INTO documents VALUES(?,?,?,?,?) ON CONFLICT(kind,id)
+            DO UPDATE SET revision=excluded.revision,data=excluded.data,updatedAt=excluded.updatedAt`)
+            .run(kind,id,expectedRevision+1,data,new Date().toISOString());
+        }
         this.db.exec('COMMIT');
-      } catch (error) { this.db.exec('ROLLBACK'); throw error; }
-    } catch (error) {
-      await Promise.allSettled(created.map(ref => this.secrets.delete(ref)));
+      }catch(error){this.db.exec('ROLLBACK');throw error;}
+    }catch(error){
+      await Promise.allSettled(pending);
+      await Promise.allSettled(created.map(ref=>this.secrets.delete(ref)));
       throw error;
     }
-    return this.get(kind, id);
+    return Promise.all(prepared.map(({kind,id})=>this.get(kind,id)));
   }
   async remove(kind, id, expectedRevision) {
     const result = this.db.prepare('DELETE FROM documents WHERE kind=? AND id=? AND revision=?').run(kind, id, expectedRevision);

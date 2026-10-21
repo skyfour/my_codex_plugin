@@ -5,6 +5,7 @@ import { executeCollection } from './execution.mjs';
 import { normalizeCollection, findItem, moveItem, duplicateItem, selectCollection } from './collections.mjs';
 import { importDocument, exportCurl, parseData, warningsFor } from './formats.mjs';
 import { isSecret, redact, transformSecrets } from './secrets.mjs';
+import {WORKSPACE_FORMAT,TRANSFER_LIMIT,workspacePreview,portableData,uniqueName,parseWorkspace} from './workspace-transfer.mjs';
 
 export const DEFAULT_SETTINGS = { requestTimeout:30000, scriptTimeout:5000, runTimeout:120000, strictSSL:true, followRedirects:true, delay:0 };
 const kinds = ['collection','environment','globals','settings','cookies'];
@@ -36,7 +37,48 @@ export class ApiService {
   async remove({kind,id,revision}) { assertKind(kind); return this.store.remove(kind,id,revision); }
   async import({text}) {
     const {kind,data,warnings}=importDocument(text);
+    if(kind==='workspace')return this.importWorkspace(data);
     return {document:await this.put({kind,data}),warnings};
+  }
+  async previewImport({text}) {
+    const imported=importDocument(text);
+    if(imported.kind==='workspace')return {...workspacePreview(imported.data),warnings:imported.warnings};
+    return {kind:imported.kind,collectionCount:imported.kind==='collection'?1:0,environmentCount:imported.kind==='environment'?1:0,warnings:imported.warnings};
+  }
+  async exportWorkspace() {
+    const collections=await this.store.list('collection'),environments=await this.store.list('environment');
+    const data={format:WORKSPACE_FORMAT,version:1,createdAt:new Date().toISOString(),collections:[],environments:[],globals:null};
+    // Export the captured document snapshots, without resolving credentials from Keychain.
+    data.collections=await Promise.all(collections.map(c=>portableData(c.data)));
+    data.environments=await Promise.all(environments.map(e=>portableData(e.data)));
+    const globals=await this.store.get('globals','default');if(globals)data.globals=await portableData(globals.data);
+    parseWorkspace(data);
+    if(Buffer.byteLength(JSON.stringify(data,null,2),'utf8')>TRANSFER_LIMIT)throw new Error('EXPORT_LIMIT: 工作区备份超过 20 MB');
+    return {data,name:'api-client-workspace-'+new Date().toISOString().slice(0,10)+'.json',warnings:['已标记的敏感变量仅保留名称；本地附件、Cookie、历史和机器设置不包含在备份中。']};
+  }
+  async importWorkspace(data) {
+    const entries=[],warnings=[],collections=await this.store.list('collection'),environments=await this.store.list('environment');
+    for(const [kind,items,existing] of [['collection',data.collections,collections],['environment',data.environments,environments]]){
+      const names=new Set(existing.map(d=>kind==='collection'?d.data.info.name:d.data.name));
+      for(const original of items){
+        const copy=await portableData(original);
+        if(kind==='collection'){
+          copy.info.name=uniqueName(copy.info.name,names);
+          warnings.push(...warningsFor(copy));
+        }else {copy.name=uniqueName(copy.name,names);delete copy.id;copy.values=copy.values.map(v=>({...v,disabled:v.disabled??v.enabled===false}));}
+        entries.push({kind,id:randomUUID(),data:copy,expectedRevision:0});
+      }
+    }
+    if(data.globals){
+      const live=await this.store.get('globals','default'),merged=structuredClone(live?.data||{values:[]}),names=new Set(merged.values.map(v=>v.key));
+      for(const variable of (await portableData(data.globals)).values){
+        if(names.has(variable.key)){warnings.push('全局变量 '+variable.key+' 已存在，保留本机值');continue;}
+        names.add(variable.key);merged.values.push({...variable,disabled:variable.disabled??variable.enabled===false});
+      }
+      if(!live||merged.values.length!==live.data.values.length)entries.push({kind:'globals',id:'default',data:merged,expectedRevision:live?.revision||0});
+    }
+    const documents=await this.store.putMany(entries);
+    return {documents,warnings:[...new Set(warnings)],...workspacePreview(data)};
   }
   async export({kind,id,format='postman',itemId}) {
     assertKind(kind);
