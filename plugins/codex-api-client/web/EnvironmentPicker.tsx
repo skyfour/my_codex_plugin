@@ -26,6 +26,7 @@ export function EnvironmentPicker({environments,globals,value,onSelect,onEdit,on
       <span>{current?.data.name||'无环境'}</span><svg className="environment-chevron" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
     </button>
     <button ref={variablesTrigger} className="environment-variables-button" aria-label="查看环境变量" aria-haspopup="dialog" aria-expanded={panel==='variables'} onClick={()=>setPanel(panel==='variables'?null:'variables')}><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M8 4H5v12h3m4-12h3v12h-3M8 8l4 4m0-4-4 4"/></svg><span>变量</span></button>
+    {current&&<button className="environment-quick-edit" aria-label="编辑当前环境" title={'编辑 '+current.data.name} onClick={()=>edit(current)}>编辑</button>}
     {panel==='select'&&<section role="dialog" aria-label="环境选择" className="environment-popover">
       <header><b>切换环境</b><small>应用于请求与脚本</small></header>
       <input ref={searchInput} className="environment-search" aria-label="搜索环境" placeholder="搜索环境…" value={search} onChange={e=>setSearch(e.target.value)} onKeyDown={e=>{if(e.key==='ArrowDown'){e.preventDefault();root.current?.querySelector<HTMLButtonElement>('[role=option]')?.focus();}}}/>
