@@ -6,6 +6,13 @@
 
 支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key、cURL/Postman 导入导出、JSON/CSV 数据迭代和取消运行。当前不支持 OAuth 授权窗口、其他协议、Vault 或云脚本包。
 
+## 快速操作
+
+- 侧栏可按名称、URL 或 HTTP 方法搜索集合和请求；搜索时自动展示匹配项的上级目录，清空搜索后恢复折叠状态。点击顶部「侧栏」可收起导航，把空间留给请求与响应；`⌘/Ctrl + K` 可重新打开并聚焦搜索。
+- 参数、请求头及变量表格可直接在末尾空白行输入，按 Enter 添加并聚焦下一行，也保留「添加一行」按钮。未输入的尾部空行不会保存或发送。
+- `⌘/Ctrl + Enter` 发送当前请求，`⌘/Ctrl + S` 保存；弹窗打开时不会误发底层请求。切换请求会记住各自的编辑页和脚本阶段。
+- 选中环境后点击旁边的「编辑」可直接修改当前环境。请求页的名称与保存操作集中在一行；新建请求和文件夹仍可从集合、文件夹菜单进入，标签栏加号可直接新建请求。
+
 ## 整体导入与导出
 
 集合列表顶部的「导出全部」将所有集合、环境和全局变量保存为一个 `api-client-workspace-日期.json` 文件，包含文件夹、请求配置，以及集合／文件夹／单个请求的请求前和响应后脚本。导出前会保存当前草稿；保存失败时停止导出。
@@ -29,3 +36,5 @@ JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；
 示例：运行 `node scripts/demo-server.mjs`，导入 `examples/` 中的集合与环境，选择本地演示环境后运行集合。执行会实际发送请求，导入本身不会执行。
 
 开发：`npm ci`、`npm run build`、`npm test`、`npm run check`。`npm run dev` 在 `127.0.0.1:47890` 提供独立预览。浏览器验证使用 `npm exec playwright -- test --config playwright.tree.config.ts`，需要 Chrome。
+
+完整界面与易用性回归使用 `npm exec playwright -- test --config playwright.usability.config.ts`；先执行 `npm run build`，确保预览加载最新界面。
