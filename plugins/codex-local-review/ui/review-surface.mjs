@@ -48,6 +48,9 @@ export function createDiffView({value,hunks,rows:preparedRows,layout='split',wra
 
 export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk,markReviewed,stageReviewed,comment,bulk,decorate}){
  const container=$('code'),tabs=$('detailTabs'),header=$('detailHeader'),column=document.querySelector('.detail-column');
+ // Keep the existing scroll owner; sticky controls define its readable top edge.
+ function topInset(){const height=header.offsetHeight+$('commitWorkspace').offsetHeight,value=height+'px';if(column.style.getPropertyValue('--summary-top-inset')!==value)column.style.setProperty('--summary-top-inset',value);return height;}
+ const resize=new ResizeObserver(topInset);for(const node of [column,header,$('commitWorkspace')])resize.observe(node);
  const summaryContainer=el('div'),fileContainer=el('div');summaryContainer.dataset.reviewSummary='';fileContainer.dataset.reviewFileView='';container.replaceChildren(summaryContainer);
  let active={kind:'summary'},signature='',generation=0,observer=null,loadedBytes=0,lastFull=false,activeReads=0,cacheOwner='',summaryScroll=0,interaction=0,positionFollow=null;
  const readWaiters=[],cards=new Map(),cardNodes=new Map(),sectionsByMode=new Map(),collapsed=new Set(),options=new Map(),cache=new Map(),loads=new WeakMap();
@@ -58,7 +61,7 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
  function userInteraction(){interaction++;stopFollowing();}
  for(const type of ['wheel','touchstart'])column.addEventListener(type,userInteraction,{capture:true,passive:true});
  for(const type of ['pointerdown','keydown'])document.addEventListener(type,userInteraction,true);
- function showActive(){const host=active.kind==='summary'?summaryContainer:fileContainer;if(container.firstElementChild!==host)container.replaceChildren(host);column.dataset.detailView=active.kind;}
+ function showActive(){const host=active.kind==='summary'?summaryContainer:fileContainer;if(container.firstElementChild!==host)container.replaceChildren(host);column.dataset.detailView=active.kind;topInset();}
  function groups(s,filtered=true){
   const filter=filtered?$('fileSearch').value.toLowerCase():'',items=s.files.filter(f=>!f.directory&&!f.symlink&&f.path.toLowerCase().includes(filter));
   if(s.live)return ['unstaged','staged'].filter(mode=>s.scope.mode==='working'||s.scope.mode===mode).map(mode=>({mode,title:mode==='unstaged'?'Working Directory · 未暂存':'Staged Files · 已暂存',items:items.filter(f=>mode==='unstaged'?f.canStage:f.canUnstage)}));
@@ -67,13 +70,13 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
  function capturePosition({preferFocus=true}={}){
   if(active.kind!=='summary'||!summaryContainer.childElementCount)return null;
   if(positionFollow?.interaction===interaction&&positionFollow.owner===cacheOwner)return positionFollow;
-  const viewport=column.getBoundingClientRect(),top=viewport.top+header.getBoundingClientRect().height;
+  const viewport=column.getBoundingClientRect(),inset=topInset(),top=viewport.top+inset;
   const focused=preferFocus?document.activeElement?.closest('[data-summary-path]'):null;
   const visibleCards=[...summaryContainer.querySelectorAll('[data-summary-path]')];
   const card=focused&&cards.has(focused)?focused:visibleCards.find(c=>{const r=c.getBoundingClientRect();return r.bottom>top&&r.top<viewport.bottom;});
   if(!card)return {interaction,owner:cacheOwner,scroll:column.scrollTop};
   const ctx=cards.get(card),siblings=visibleCards.filter(node=>cards.get(node)?.mode===ctx.mode).map(node=>({node,path:cards.get(node).path})),index=siblings.findIndex(c=>c.node===card),rect=card.getBoundingClientRect();
-  return {interaction,owner:cacheOwner,mode:ctx.mode,path:ctx.path,offset:rect.top-viewport.top,replacementOffset:Math.max(header.getBoundingClientRect().height+8,card.querySelector('.summary-file-header').getBoundingClientRect().top-viewport.top),next:siblings.slice(index+1).map(c=>c.path),previous:siblings.slice(0,index).reverse().map(c=>c.path),scroll:column.scrollTop};
+  return {interaction,owner:cacheOwner,mode:ctx.mode,path:ctx.path,offset:rect.top-viewport.top,replacementOffset:Math.max(inset+8,card.querySelector('.summary-file-header').getBoundingClientRect().top-viewport.top),next:siblings.slice(index+1).map(c=>c.path),previous:siblings.slice(0,index).reverse().map(c=>c.path),scroll:column.scrollTop};
  }
  function keepPosition(){
   const token=positionFollow;if(!token||token.interaction!==interaction||token.owner!==cacheOwner||active.kind!=='summary')return;
@@ -173,9 +176,9 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
   }
   if(!target)return null;
   if(Number.isFinite(offset))column.scrollTop+=target.getBoundingClientRect().top-offset;
-  else{const rect=column.getBoundingClientRect(),bounds=target.getBoundingClientRect(),top=rect.top+header.offsetHeight+(matchMedia('(min-width:801px)').matches?card.querySelector('.summary-file-header').offsetHeight:0);if(bounds.top<top)column.scrollTop+=bounds.top-top;else if(bounds.bottom>rect.bottom)column.scrollTop+=bounds.bottom-rect.bottom;}
+  else{const rect=column.getBoundingClientRect(),bounds=target.getBoundingClientRect(),top=rect.top+topInset()+(matchMedia('(min-width:801px)').matches?card.querySelector('.summary-file-header').offsetHeight:0);if(bounds.top<top)column.scrollTop+=bounds.top-top;else if(bounds.bottom>rect.bottom)column.scrollTop+=bounds.bottom-rect.bottom;}
   restorePosition({interaction,owner:cacheOwner,mode:ctx.mode,path:ctx.path,offset:card.getBoundingClientRect().top-column.getBoundingClientRect().top,scroll:column.scrollTop});return target;
  }
- async function reveal(path,mode,expectedInteraction=interaction){if(active.kind!=='summary'||expectedInteraction!==interaction)return;const card=cardNodes.get(key({path,mode}))||[...cards.keys()].find(c=>cards.get(c).path===path);if(!card)return;const ctx=cards.get(card),token=generation;restorePosition({interaction,owner:cacheOwner,mode:ctx.mode,path:ctx.path,offset:header.getBoundingClientRect().height+8,replacementOffset:header.getBoundingClientRect().height+8,scroll:column.scrollTop});card.querySelector('[data-collapse-file]')?.focus({preventScroll:true});if(!collapsed.has(key(ctx)))await load(card,ctx);if(token===generation&&expectedInteraction===interaction)keepPosition();}
- return {render,reset,summary,activate,reveal,showComment,views,capturePosition,restorePosition,fileContainer,get activeContainer(){return active.kind==='summary'?summaryContainer:fileContainer;},interactionToken:()=>interaction,isSummary:()=>active.kind==='summary',busy};
+ async function reveal(path,mode,expectedInteraction=interaction){if(active.kind!=='summary'||expectedInteraction!==interaction)return;const card=cardNodes.get(key({path,mode}))||[...cards.keys()].find(c=>cards.get(c).path===path);if(!card)return;const ctx=cards.get(card),token=generation,inset=topInset();restorePosition({interaction,owner:cacheOwner,mode:ctx.mode,path:ctx.path,offset:inset+8,replacementOffset:inset+8,scroll:column.scrollTop});card.querySelector('[data-collapse-file]')?.focus({preventScroll:true});if(!collapsed.has(key(ctx)))await load(card,ctx);if(token===generation&&expectedInteraction===interaction)keepPosition();}
+ return {render,reset,summary,activate,reveal,showComment,views,capturePosition,restorePosition,topInset,fileContainer,get activeContainer(){return active.kind==='summary'?summaryContainer:fileContainer;},interactionToken:()=>interaction,isSummary:()=>active.kind==='summary',busy};
 }
