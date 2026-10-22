@@ -8,7 +8,7 @@ import {ListToolsRequestSchema} from '@modelcontextprotocol/sdk/types.js';
 import {registerAppResource,RESOURCE_MIME_TYPE} from '@modelcontextprotocol/ext-apps/server';
 import {z} from 'zod';
 import {snapshot,listChanges,ReviewStore,markdown} from '../src/review.mjs';
-import {Projects,browseFolders,discoverProjects,pickFolders,projectFiles,gitRead} from '../src/projects.mjs';
+import {Projects,browseFolders,discoverProjects,pickFolders,projectFiles,gitRead,isHistoryBranchRef} from '../src/projects.mjs';
 import {DEFAULT_LIMITS,validateLimits} from '../src/limits.mjs';
 import {indexState,changeIndex} from '../src/git-index.mjs';
 import {prepareCommit,commitStaged} from '../src/git-commit.mjs';
@@ -18,9 +18,9 @@ import {stageReviewedFile} from '../src/review-stage.mjs';
 import {TaskContextProvider} from '../src/task-context-provider.mjs';
 import {createHash} from 'node:crypto';
 const digest=f=>createHash('sha256').update(JSON.stringify([f.path,f.before,f.after])).digest('hex');
-export const VERSION='0.5.4';
+export const VERSION='0.5.5';
 export const URI=`ui://codex-local-review/${VERSION}/workbench.html`;
-export function html(){const safe=s=>s.replaceAll('</script','<\\/script');const libraries=['diff/dist/diff.js','@highlightjs/cdn-assets/highlight.min.js'].map(p=>`<script>${safe(readFileSync(new URL('../node_modules/'+p,import.meta.url),'utf8'))}</script>`).join('');return readFileSync(new URL('../ui/index.html',import.meta.url),'utf8').replace('<!-- STYLES -->',()=>`<style>${readFileSync(new URL('../ui/styles.css',import.meta.url),'utf8')}</style>`).replace('<!-- SCRIPT -->',()=>libraries+`<script type="module">${(readFileSync(new URL('../ui/diff.mjs',import.meta.url),'utf8').replaceAll('export function','function')+'\n'+readFileSync(new URL('../ui/app.mjs',import.meta.url),'utf8')+'\n'+readFileSync(new URL('../ui/git-workbench.mjs',import.meta.url),'utf8')+'\n'+readFileSync(new URL('../ui/review-surface.mjs',import.meta.url),'utf8').replaceAll('export function','function')).replaceAll('</script','<\\/script')}</script>`);}
+export function html(){const safe=s=>s.replaceAll('</script','<\\/script');const libraries=['diff/dist/diff.js','@highlightjs/cdn-assets/highlight.min.js'].map(p=>`<script>${safe(readFileSync(new URL('../node_modules/'+p,import.meta.url),'utf8'))}</script>`).join('');return readFileSync(new URL('../ui/index.html',import.meta.url),'utf8').replace('<!-- STYLES -->',()=>`<style>${readFileSync(new URL('../ui/styles.css',import.meta.url),'utf8')}</style>`).replace('<!-- SCRIPT -->',()=>libraries+`<script type="module">${(readFileSync(new URL('../ui/diff.mjs',import.meta.url),'utf8').replaceAll('export function','function')+'\n'+readFileSync(new URL('../ui/app.mjs',import.meta.url),'utf8')+'\n'+readFileSync(new URL('../ui/git-workbench.mjs',import.meta.url),'utf8')+'\n'+readFileSync(new URL('../ui/history.mjs',import.meta.url),'utf8')+'\n'+readFileSync(new URL('../ui/review-surface.mjs',import.meta.url),'utf8').replaceAll('export function','function')).replaceAll('</script','<\\/script')}</script>`);}
 export async function createServer({picker=pickFolders,taskContexts=new TaskContextProvider(),dir=process.env.LOCAL_REVIEW_HOME??join(process.env.CODEX_HOME??join(homedir(),'.codex'),'local-review')}={}){
  const store=await ReviewStore.open(dir),server=new McpServer({name:'codex-local-review',version:VERSION}),definitions=[],actions=new Map(),projects=new Projects(store);
  const keywordCache=new Map();
@@ -35,7 +35,7 @@ export async function createServer({picker=pickFolders,taskContexts=new TaskCont
  register('project_open',z.object({path:z.string().min(1).max(4096).optional(),id:id.optional()}).strict().refine(a=>a.path||a.id),async args=>{const p=await projects.open(args.path??projects.get(args.id).path);return {project:p,repository:await projects.inspect(p),...workspace()};},{write:true});
  register('project_pick',empty,async()=>{const selected=await picker();for(const path of selected.slice(0,100))await projects.open(path);return {...workspace(),canceled:selected.length===0};},{write:true});
  register('project_add_many',z.object({paths:z.array(z.string().min(1).max(4096)).min(1).max(100)}).strict(),async({paths})=>{for(const path of paths)await projects.open(path);return workspace();},{write:true});
- register('project_update',z.object({id,pinned:z.boolean().optional(),state:z.object({mode:scope.mode.optional(),base:z.string().max(512).optional(),target:z.string().max(512).optional(),file:z.string().max(4096).optional(),lastReview:id.nullable().optional()}).strict().optional()}).strict(),({id,...patch})=>{projects.update(id,patch);return workspace();},{write:true});
+ register('project_update',z.object({id,pinned:z.boolean().optional(),state:z.object({mode:scope.mode.optional(),base:z.string().max(512).optional(),target:z.string().max(512).optional(),file:z.string().max(4096).optional(),lastReview:id.nullable().optional(),historyMode:z.enum(['current','all','selected']).optional(),historyRefs:z.array(z.string().min(1).max(512).refine(isHistoryBranchRef)).max(32).optional()}).strict().optional()}).strict(),async({id,...patch})=>{if(patch.state?.historyRefs?.length){const p=projects.get(id),saved=new Set(p.state?.historyRefs??[]),added=patch.state.historyRefs.filter(ref=>!saved.has(ref));if(added.length){const known=new Set((await projects.branches(p)).map(b=>b.ref));if(added.some(ref=>!known.has(ref)))throw Error('所选分支已不存在，请刷新分支列表');}}projects.update(id,patch);return workspace();},{write:true});
  register('project_close',z.object({id}).strict(),({id})=>{projects.closeProject(id);return workspace();},{write:true});
  register('project_forget',z.object({id}).strict(),({id})=>{projects.forget(id);return workspace();},{write:true});
  register('folder_browse',z.object({path:z.string().max(4096).optional()}).strict(),args=>browseFolders(args.path));

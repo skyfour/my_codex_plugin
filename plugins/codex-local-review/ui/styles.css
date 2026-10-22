@@ -146,3 +146,15 @@ body[aria-busy=true] #reviewFullscreen{pointer-events:auto;cursor:pointer}
 .review-fullscreen :is(.topbar,.project-tabs,.git-command-bar,.projects-column,.files-column){display:none!important}
 .review-fullscreen .workbench{grid-row:1;grid-template-columns:minmax(0,1fr)}
 .review-fullscreen .statusbar{grid-row:2}
+
+/* Current branch occupies the same centre point regardless of sync-status length. */
+.git-command-bar{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);flex-wrap:nowrap}
+.git-command-bar #switchBranch{grid-column:2;grid-row:1;justify-self:center;max-width:100%;min-width:0}
+.git-command-bar #syncStatus{grid-column:1;grid-row:1;max-width:100%;min-width:0}
+.git-remote-actions{grid-column:3;grid-row:1;display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.history-filter{display:flex;align-items:center;gap:6px;min-width:0}.history-filter label{font-size:11px;color:var(--muted);flex:none}.history-filter select{flex:1;min-width:0;font-size:11px}.history-filter button{font-size:11px;padding-inline:6px}
+.history-hint{font-size:10px;margin:5px 0 8px;overflow-wrap:anywhere;line-height:1.5}
+.commit-refs{display:flex;gap:4px;overflow:hidden;margin-top:4px}.commit-ref{display:block;flex:0 1 auto;min-width:0;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;padding:0 4px;border:1px solid var(--border);border-radius:3px;color:var(--muted)}.commit-head{flex:none;color:var(--accent);border-color:currentColor}
+#historyDialog{width:min(520px,calc(100vw - 24px))}#historyBranches{max-height:40vh;overflow:auto;margin-block:12px}#historyBranches h3{font-size:11px;color:var(--muted);margin:12px 0 6px}#historyBranches label{display:flex;align-items:center;gap:9px;min-height:34px;padding:5px 7px;border-radius:4px;cursor:pointer}#historyBranches label:hover{background:var(--selected)}#historyBranches label>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#historyBranches input{flex:none}.history-dialog-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.history-dialog-footer>span{margin-right:auto}
+@media(max-width:800px){.git-command-bar{grid-template-columns:minmax(0,1fr) auto;padding-inline:10px}.git-command-bar #switchBranch{grid-column:1}.git-remote-actions{grid-column:2;gap:6px}.history-filter{flex-wrap:wrap}.history-filter label{display:none}}
+@media(max-width:520px){.git-command-bar button{font-size:11px;padding-inline:6px}.git-remote-actions{gap:4px}.history-filter{gap:3px}.history-filter button{font-size:10px;padding-inline:4px}}
