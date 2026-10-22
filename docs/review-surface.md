@@ -17,10 +17,21 @@
 
 这轮对齐的是审阅区的上述流程。已有的评论、审阅标记、快照和任务联动继续保留；本轮没有新增逐行暂存、鼠标拖动上下文边界或 Git 提交图功能。
 
+## 分支与历史范围
+
+Git 命令栏中央是当前工作分支入口，右侧保留 Fetch / Pull / Push。Sublime Merge 的[Header 说明](https://www.sublimemerge.com/docs/themes)将当前分支信息放在中央；它的[分支可见性](https://www.sublimemerge.com/blog/sublime-merge-build-1070)与 checkout 是独立操作。本插件按同样区分处理历史范围：
+
+- 当前分支：显示当前 HEAD 可达的历史，包含共同祖先；不是与某个基线比较后只取独有提交。detached HEAD 沿用当前提交；未产生首次提交的分支显示空历史。
+- 全部分支：合并本地、远程分支以及当前 HEAD 的历史；排除仅由标签或 stash 引用的提交。
+- 选择分支：可搜索并勾选最多 32 个指定分支，共同提交去重。选择只影响历史显示，不 checkout；每个项目分别保存范围。
+
+历史按拓扑顺序显示最多 100 条，分支标签标在各分支 tip，HEAD 单独标记。真正 checkout 后保留历史页并优先选择当前范围内的新 HEAD；纯范围筛选尽量保留已选 SHA，仍可见时不重载差异或丢失草稿，超出范围时选新的可见提交。所选引用被删除后显示提示，可重新选择；外部 checkout 后点击刷新同步，当前正在看快照也会更新仓库元数据。切换到其他 commit 前先保存旧草稿并清除旧文件锚点；相同路径不会把前一份提交的评论带过去，原草稿仍可从原审查记录恢复。分支比较使用完整 refs，分支展示名由完整 symbolic ref 提取，避免同名标签造成消歧错误。
+
 ## 模块边界
 
 - `ui/review-surface.mjs`：Summary 状态、文件标签、分区投影、按需加载、局部折叠与共用差异渲染。接收 DTO 与回调，不访问 Git、TAPD、凭据或数据库。
 - `ui/app.mjs`：把界面意图转换成现有 MCP 应用服务调用，保存评论、快照与提交草稿；局部操作显式携带文件、范围、fingerprint 或 hunk token。
+- `ui/history.mjs`：历史范围与分支多选界面，按项目保存偏好，协调已选提交与空历史状态；不执行 checkout。
 - `ui/git-workbench.mjs`：现有 Git 操作与确认窗适配器。Summary 传入自己的操作上下文，确认窗使用目标文件名，不借用全局当前文件。
 - 既有 Git/审查领域服务保持职责不变；服务端只增加新 UI 模块的内联装载。
 
@@ -53,3 +64,5 @@ npm run test:local-review-ui
 0.5.0 初次实现时的验证结果：137 项 Node 测试通过，两个插件的 stdio MCP 检查通过，六组代码审查 Chrome 脚本全部通过；其中新增 Summary 回归 17 项、现有控件与窗口审计 42 项。真实 Git 写操作只作用于临时测试仓库，远程同步使用本机临时 bare 仓库。
 
 截图与检查 JSON 默认输出到 `/tmp/codex-plugin-ui-audit`；初次实现的归档使用 `exports/review-surface-2026-10-15/`。测试数据均为合成内容。0.5.3 加入连续操作与性能脚本，完整代码审查浏览器套件当时包含九组脚本。0.5.4 新增 `scripts/check-local-review-fullscreen.mjs`，覆盖历史 commit 的展开与退出、真实折行变化后的行锚点、DOM 与 RPC 保持、文件导航、评论草稿、已审阅状态、关闭折行的横向位置、弹窗 Esc、写入等待时退出、深色主题和窄矮窗口；完整套件现包含十组脚本。
+
+0.5.5 加入 `scripts/check-local-review-history.mjs`；完整代码审查浏览器套件包含十一组，新增回归验证分叉历史、全部／指定分支并集、HEAD 标记、范围切换保留 DOM 与草稿、真实与外部 checkout、已保存分支失效及窄屏操作。后端同时验证完整 refs 白名单、超过 200 个分支、detached／unborn、每项目持久化、拓扑排序和标签／stash 排除。

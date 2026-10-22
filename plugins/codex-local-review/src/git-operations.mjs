@@ -6,7 +6,7 @@ import {git,indexState} from './git-index.mjs';
 import {withGitWrite} from './git-lock.mjs';
 const hash=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export async function repositoryStatus(root){
- const state=await indexState(root),branch=(await git(state.root,['symbolic-ref','--short','-q','HEAD']).catch(()=>'' )).trim();
+ const state=await indexState(root),branch=(await git(state.root,['symbolic-ref','-q','HEAD']).catch(()=>'' )).trim().replace(/^refs\/heads\//,'');
  const lines=(await git(state.root,['for-each-ref','--format=%(refname)%00%(objectname)%00%(symref)','refs/heads','refs/remotes'])).trim().split('\n').filter(Boolean);
  const branches=lines.map(line=>{const [ref,sha,symref]=line.split('\0');return {ref,sha,symref,name:ref.replace(/^refs\/(heads|remotes)\//,''),local:ref.startsWith('refs/heads/')};}).filter(b=>!b.symref);
  const remotes=(await git(state.root,['remote'])).trim().split('\n').filter(Boolean);let upstream=null,ahead=null,behind=null;

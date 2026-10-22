@@ -2,7 +2,7 @@
 let gitStatus=null,gitDialogState=null,gitStatusSequence=0;
 async function refreshGitStatus(){const selected=project,request=++gitStatusSequence;gitStatus=null;if(selected?.isGit){try{const result=await call('git_status',{id:selected.id});if(request!==gitStatusSequence||project!==selected)return;gitStatus=result;}catch(e){if(request!==gitStatusSequence||project!==selected)return;gitStatus={error:e.message,branch:repository?.branch??'',remotes:[],branches:[],files:[]};}}updateGitWorkbench();}
 function updateGitWorkbench(){const working=busy||fileLoading;
- const enabled=Boolean(project?.isGit),live=liveGit();$('gitCommandBar').hidden=!enabled;$('currentBranch').textContent=gitStatus?.branch||repository?.branch||'分离 HEAD';$('syncStatus').textContent=gitStatus?.upstream?`${gitStatus.upstream.remote}/${gitStatus.upstream.branch} · ↓${gitStatus.behind??'?'} ↑${gitStatus.ahead??'?'}`:gitStatus?.error||'未设置 upstream';
+ const enabled=Boolean(project?.isGit),live=liveGit();$('gitCommandBar').hidden=!enabled;$('currentBranch').textContent=gitStatus?.branch||repository?.branch||'分离 HEAD';$('switchBranch').title='切换或创建分支 · '+$('currentBranch').textContent;$('syncStatus').textContent=gitStatus?.upstream?`${gitStatus.upstream.remote}/${gitStatus.upstream.branch} · ↓${gitStatus.behind??'?'} ↑${gitStatus.ahead??'?'}`:gitStatus?.error||'未设置 upstream';
  for(const id of ['switchBranch','gitFetch','gitPull','gitPush','pullOptions','pushOptions'])$(id).disabled=working||!enabled||!gitStatus||Boolean(gitStatus.error);
  $('gitAll').hidden=!live;$('stageAll').disabled=working||!gitStatus?.files?.some(f=>f.canStage);$('unstageAll').disabled=working||!gitStatus?.files?.some(f=>f.canUnstage);$('discardAll').disabled=$('stageAll').disabled;
  const current=files.find(f=>f.path===(file?.path??failedFile?.path));$('discardFile').hidden=!live||!current?.canStage||fileMode==='staged';$('discardFile').disabled=working;
@@ -11,7 +11,7 @@ function updateGitWorkbench(){const working=busy||fileLoading;
  for(const input of document.querySelectorAll('#gitOperationForm input,#gitOperationForm select,#gitPreviewOperation,#gitCreateBranch,#gitDialog [data-close]'))input.disabled=working;
  $('gitConfirmOperation').disabled=working||!gitDialogState?.plan;
 }
-async function refreshAfterGit(preferred=file?.path??failedFile?.path){repository=(await call('project_open',{id:project.id})).repository;review=null;tab='changes';scope={mode:'working'};await loadChanges(preferred,{preserveSummary:true});renderProjects();}
+async function refreshAfterGit(preferred=file?.path??failedFile?.path,{preferHead=false}={}){saveDraft();const wasHistory=tab==='commits';repository=(await call('project_open',{id:project.id})).repository;if(wasHistory)await showCommitHistory({preferHead});else{leaveReviewContext();review=null;tab='changes';scope={mode:'working'};await loadChanges(preferred,{preserveSummary:true});}renderProjects();}
 async function stageAll(operation){await run(async()=>{const state=await call('git_status',{id:project.id}),records=state.files.filter(f=>operation==='stage'?f.canStage:f.canUnstage);if(!records.length)return;await call('git_index_change',{id:project.id,mode:'working',operation,files:records.map(({path,fingerprint})=>({path,fingerprint}))});await refreshAfterGit();},operation==='stage'?'正在暂存全部文件…':'正在取消全部暂存…');}
 function dialogArgs(){
  const d=gitDialogState,args={operation:d.operation};
@@ -39,13 +39,13 @@ $('gitPreviewOperation').onclick=()=>void previewGitOperation();
 let gitPreviewTimer;
 for(const id of ['gitBranchTarget','gitNewBranch','gitRemoteTarget','gitRemoteBranch','gitSetUpstream'])$(id).oninput=()=>{invalidateGitPlan();clearTimeout(gitPreviewTimer);gitPreviewTimer=setTimeout(()=>{if($('gitDialog').open&&!busy)void previewGitOperation();},250);};
 $('gitCreateBranch').onclick=()=>{$('gitDialog').close();void openGitOperation('create_branch',{choose:true});};
-$('gitOperationForm').onsubmit=e=>{e.preventDefault();const d=gitDialogState;if(!d?.plan||busy)return;const plan=d.plan;$('gitConfirmOperation').disabled=true;void run(async()=>{try{await call('git_operation_execute',{id:d.projectId,...plan.args,token:plan.token,confirmed:true});$('gitDialog').close();await refreshAfterGit();$('gitResult').textContent='已完成 '+plan.args.operation;}catch(error){d.plan=null;$('gitDialogError').textContent=error.message;await refreshGitStatus();throw error;}},'正在执行 Git 操作…');};
+$('gitOperationForm').onsubmit=e=>{e.preventDefault();const d=gitDialogState;if(!d?.plan||busy)return;const plan=d.plan;$('gitConfirmOperation').disabled=true;void run(async()=>{try{await call('git_operation_execute',{id:d.projectId,...plan.args,token:plan.token,confirmed:true});$('gitDialog').close();await refreshAfterGit(undefined,{preferHead:['switch','create_branch','pull'].includes(plan.args.operation)});$('gitResult').textContent='已完成 '+plan.args.operation;}catch(error){d.plan=null;$('gitDialogError').textContent=error.message;await refreshGitStatus();throw error;}},'正在执行 Git 操作…');};
 async function quickRemote(operation){
  if(busy||!project?.isGit)return;
  const upstream=gitStatus?.upstream,remotes=gitStatus?.remotes??[];
  if(!remotes.length||operation==='pull'&&!upstream||!upstream&&remotes.length>1){await openGitOperation(operation,{choose:true});return;}
  const args={operation,remote:upstream?.remote??remotes[0],...(operation==='pull'?{branch:upstream.branch}:{})};
- await run(async()=>{const plan=await call('git_operation_prepare',{id:project.id,...args});await call('git_operation_execute',{id:project.id,...args,token:plan.token,confirmed:true});await refreshAfterGit();$('gitResult').textContent='已完成 '+operation;},operation==='fetch'?'正在 Fetch 远程引用…':'正在 Pull（仅快进）…');
+ await run(async()=>{const plan=await call('git_operation_prepare',{id:project.id,...args});await call('git_operation_execute',{id:project.id,...args,token:plan.token,confirmed:true});await refreshAfterGit(undefined,{preferHead:operation==='pull'});$('gitResult').textContent='已完成 '+operation;},operation==='fetch'?'正在 Fetch 远程引用…':'正在 Pull（仅快进）…');
 }
 $('switchBranch').onclick=()=>void openGitOperation('switch');$('gitFetch').onclick=()=>void quickRemote('fetch');$('gitPull').onclick=()=>void quickRemote('pull');$('gitPush').onclick=()=>void openGitOperation('push');$('pullOptions').onclick=()=>void openGitOperation('pull',{choose:true});$('pushOptions').onclick=()=>void openGitOperation('push',{choose:true});
 $('discardFile').onclick=()=>void openGitOperation('discard',{paths:[file?.path??failedFile?.path]});$('discardAll').onclick=()=>void openGitOperation('discard');$('stageAll').onclick=()=>void stageAll('stage');$('unstageAll').onclick=()=>void stageAll('unstage');

@@ -6,6 +6,9 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 const exec=promisify(execFile);
 export async function gitRead(root,args){return (await exec('git',['-c','core.fsmonitor=false','-C',root,...args],{encoding:'utf8',maxBuffer:8*1024*1024,timeout:15000,env:{...process.env,GIT_OPTIONAL_LOCKS:'0',GIT_TERMINAL_PROMPT:'0'}})).stdout;}
+export function isHistoryBranchRef(ref){
+ return typeof ref==='string'&&ref.length<=512&&/^refs\/(heads|remotes)\//.test(ref)&&!/[\x00-\x20\x7f~^:?*\[\\]/.test(ref)&&!ref.includes('..')&&!ref.includes('@{')&&!ref.endsWith('.')&&ref.split('/').every(part=>part&&!part.startsWith('.')&&!part.endsWith('.lock'));
+}
 export async function normalizeProject(input){
  if(!input?.trim())throw Error('请选择项目文件夹');
  const expanded=input==='~'?homedir():input.startsWith('~/')?join(homedir(),input.slice(2)):input;
@@ -27,14 +30,22 @@ export class Projects{
  update(id,patch){const p=this.get(id);if(patch.pinned!==undefined)p.pinned=patch.pinned;if(patch.state)p.state={...p.state,...patch.state};return this.put(p);}
  forget(id){this.get(id);this.db.prepare('DELETE FROM projects WHERE id=?').run(id);if(this.preference('activeProject')===id)this.preference('activeProject',null);}
  closeProject(id){const p=this.get(id);this.put({...p,opened:false});if(this.preference('activeProject')===id)this.preference('activeProject',this.list().find(p=>p.opened!==false)?.id??null);}
+ async branches(p){
+  if(!p.isGit)return [];
+  return (await gitRead(p.path,['for-each-ref','--format=%(refname)%00%(objectname)%00%(symref)','refs/heads','refs/remotes'])).trim().split('\n').filter(Boolean).map(line=>{const [ref,sha,symref]=line.split('\0');return {ref,sha,symref,name:ref.replace(/^refs\/(heads|remotes)\//,''),local:ref.startsWith('refs/heads/')};}).filter(b=>!b.symref).map(({symref,...branch})=>branch);
+ }
  async inspect(p){
-  if(!p.isGit)return {branch:'文件夹',branches:[],commits:[]};
-  const branch=(await gitRead(p.path,['symbolic-ref','--short','-q','HEAD']).catch(()=> '分离 HEAD')).trim();
-  const branches=(await gitRead(p.path,['for-each-ref','--format=%(refname:short)%00%(objectname)','refs/heads','refs/remotes'])).trim().split('\n').filter(Boolean).slice(0,200).map(s=>{const [name,sha]=s.split('\0');return {name,sha};});
-  // No HEAD yet is a valid repository; other log errors remain visible.
-  let commits=[];const heads=await gitRead(p.path,['rev-list','--all','--count']);
-  if(heads.trim()!=='0'){const values=(await gitRead(p.path,['log','--all','-100','-z','--date=iso-strict','--format=%H%x00%P%x00%an%x00%aI%x00%s'])).split('\0');for(let i=0;i+4<values.length;i+=5){commits.push({sha:values[i],parents:values[i+1].split(' ').filter(Boolean),author:values[i+2],date:values[i+3],title:values[i+4]});}}
-  return {branch,branches,commits};
+  const historyMode=['current','all','selected'].includes(p.state?.historyMode)?p.state.historyMode:'current',historyRefs=[...new Set(p.state?.historyRefs??[])];
+  if(!p.isGit)return {branch:'文件夹',head:null,branches:[],commits:[],historyMode,historyRefs,missingHistoryRefs:[]};
+  const branch=(await gitRead(p.path,['symbolic-ref','-q','HEAD']).catch(()=> '分离 HEAD')).trim().replace(/^refs\/heads\//,'');
+  const branches=await this.branches(p),known=new Map(branches.map(b=>[b.ref,b.sha])),missingHistoryRefs=historyRefs.filter(ref=>!known.has(ref)),tips=new Map();
+  for(const b of branches)tips.set(b.sha,[...(tips.get(b.sha)??[]),b.name]);
+  // An unborn HEAD is valid even when other branches already have commits.
+  let head=null;try{head=(await gitRead(p.path,['rev-parse','--verify','--quiet','HEAD^{commit}'])).trim();}catch(error){if(error.code!==1)throw error;}
+  const targets=historyMode==='selected'?[...new Set(historyRefs.map(ref=>known.get(ref)).filter(Boolean))]:head?[head]:[];
+  const hasCommits=targets.length>0||historyMode==='all'&&branches.length>0,commits=[];
+  if(hasCommits){const values=(await gitRead(p.path,['log','--topo-order','-100','-z','--date=iso-strict','--format=%H%x00%P%x00%an%x00%aI%x00%s',...(historyMode==='all'?['--branches','--remotes']:[]),'--end-of-options',...targets,'--'])).split('\0');for(let i=0;i+4<values.length;i+=5){commits.push({sha:values[i],parents:values[i+1].split(' ').filter(Boolean),author:values[i+2],date:values[i+3],title:values[i+4],refs:tips.get(values[i])??[]});}}
+  return {branch,head,branches,commits,historyMode,historyRefs,missingHistoryRefs};
  }
 }
 export async function browseFolders(path=homedir()){
