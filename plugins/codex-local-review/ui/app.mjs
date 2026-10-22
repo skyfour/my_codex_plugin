@@ -16,7 +16,7 @@ async function run(fn,label='正在加载…'){
  if(busy)return;selectionSequence++;fileLoading=false;busy=true;updateBusy();$('reviewed').disabled=true;status(label);$('dialogError').textContent='';updateActions();
  try{await fn();status('就绪');}catch(e){status(e.message,true);if($('openDialog').open)$('dialogError').textContent=e.message;if($('settingsDialog').open)$('settingsError').textContent=e.message;if(liveGit())$('commitError').textContent=e.message;}finally{busy=false;updateBusy();$('reviewed').disabled=!file||file.binary||!project;updateActions();focusCommentEditor();const next=pendingNavigation;pendingNavigation=null;next?.();}
 }
-function acceptWorkspace(data){if(data.version&&data.version!=='0.5.7')status('插件后台仍是旧版本，请重开 Codex 后打开新工作台',true);for(const key of ['projects','reviews','activeProject','limits'])if(data[key]!==undefined)workspace[key]=data[key];renderProjects();renderReviews();}
+function acceptWorkspace(data){if(data.version&&data.version!=='0.5.8')status('插件后台仍是旧版本，请重开 Codex 后打开新工作台',true);for(const key of ['projects','reviews','activeProject','limits'])if(data[key]!==undefined)workspace[key]=data[key];renderProjects();renderReviews();}
 function projectCopy(p){const copy=el('span',undefined,'project-copy');copy.append(el('strong',(p.pinned?'◆ ':'')+p.name),el('small',p.path));return copy;}
 function renderProjects(){
  const filter=$('projectSearch').value.toLowerCase();$('projects').replaceChildren();for(const p of workspace.projects.filter(p=>(p.name+' '+p.path).toLowerCase().includes(filter))){const b=button('',()=>navigate(()=>openProject({id:p.id}),{projectId:null}));b.title=p.path;b.dataset.projectId=p.id;b.oncontextmenu=e=>{e.preventDefault();if(!busy)manage(p);};b.setAttribute('aria-current',String(project?.id===p.id));b.append(el('span','⌘','project-icon'),projectCopy(p));$('projects').append(b);}
@@ -200,14 +200,15 @@ function setReviewFullscreen(expanded){
  const rect=scroller.getBoundingClientRect(),top=scroller.scrollTop,left=scroller.scrollLeft;
  const horizontal=[...code.querySelectorAll('.diff-view')].map(node=>({node,left:node.scrollLeft,saved:fullscreenHorizontal.get(node)}));
  // Anchor a complete visible line: rewrapping changes the height of preceding code.
- const stickyHeight=reviewSurface.isSummary()?$('detailHeader').offsetHeight+(matchMedia('(min-width:801px)').matches?column.querySelector('.summary-file-header')?.offsetHeight||0:0):0;
+ const stickyHeight=reviewSurface.isSummary()?reviewSurface.topInset()+(matchMedia('(min-width:801px)').matches?column.querySelector('.summary-file-header')?.offsetHeight||0:0):0;
  const visibleTop=rect.top+stickyHeight,views=top?horizontal.map(item=>item.node).filter(view=>{const r=view.getBoundingClientRect();return r.bottom>visibleTop&&r.top<rect.bottom;}):[];
  const visibleRows=views.flatMap(view=>[...view.querySelectorAll('tr[data-row]')]).map(node=>({node,rect:node.getBoundingClientRect()})).filter(row=>row.rect.bottom>visibleTop&&row.rect.top<rect.bottom);
  const line=visibleRows.find(row=>row.rect.top>=visibleTop)||visibleRows[0];
  document.body.classList.toggle('review-fullscreen',expanded);
  const toggle=$('reviewFullscreen');toggle.setAttribute('aria-pressed',String(expanded));toggle.querySelector('span').textContent=expanded?'退出全屏':'全屏审阅';toggle.title=expanded?'退出全屏审阅（Esc）':'展开审阅区；Esc 退出全屏';
  scroller.scrollTop=top;scroller.scrollLeft=left;
- if(line)scroller.scrollTop+=line.node.getBoundingClientRect().top-scroller.getBoundingClientRect().top-(line.rect.top-rect.top);
+ const nextStickyHeight=reviewSurface.isSummary()?reviewSurface.topInset()+(matchMedia('(min-width:801px)').matches?column.querySelector('.summary-file-header')?.offsetHeight||0:0):0;
+ if(line)scroller.scrollTop+=line.node.getBoundingClientRect().top-scroller.getBoundingClientRect().top-(line.rect.top-rect.top)-(nextStickyHeight-stickyHeight);
  for(const {node,left,saved} of horizontal){
   // Undo width clamping on exit, unless the reader scrolled to a new position.
   node.scrollLeft=!expanded&&saved&&left===saved.clamped?saved.left:left;
@@ -216,13 +217,13 @@ function setReviewFullscreen(expanded){
 }
 $('reviewFullscreen').onclick=()=>setReviewFullscreen(!document.body.classList.contains('review-fullscreen'));
 document.addEventListener('keydown',e=>{if(branchPickerOpen()){if(e.key==='Escape'){e.preventDefault();closeBranchPicker(true);}if((e.metaKey||e.ctrlKey)&&['o','p','r'].includes(e.key.toLowerCase()))e.preventDefault();return;}if(document.querySelector('dialog[open]')){if((e.metaKey||e.ctrlKey)&&['o','p','r'].includes(e.key.toLowerCase()))e.preventDefault();return;}if(e.key==='Escape'){if(document.body.classList.contains('review-fullscreen')){e.preventDefault();setReviewFullscreen(false);}document.body.classList.remove('project-drawer');$('projectMenu').setAttribute('aria-expanded','false');}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='o'){e.preventDefault();nativeChoice();}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='p'){e.preventDefault();showQuick();}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='r'){e.preventDefault();$('refresh').click();}else if(!document.querySelector('dialog[open]')&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!e.target.isContentEditable){if((e.altKey&&['ArrowDown','ArrowUp'].includes(e.key))||(!e.metaKey&&!e.ctrlKey&&!e.altKey&&['j','k'].includes(e.key.toLowerCase()))){e.preventDefault();moveFile(e.key==='ArrowDown'||e.key.toLowerCase()==='j'?1:-1);}}});
-async function init(){try{const data=await rpc('ui/initialize',{appInfo:{name:'codex-local-review',version:'0.5.7'},appCapabilities:{},protocolVersion:'2026-01-26'});if(['light','dark'].includes(data?.hostContext?.theme))document.documentElement.style.colorScheme=data.hostContext.theme;window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/size-changed',params:{height:900,width:document.documentElement.clientWidth}},'*');await run(async()=>{acceptWorkspace(await call('review_open'));if(workspace.activeProject&&workspace.projects.some(p=>p.id===workspace.activeProject))await openProject({id:workspace.activeProject});});}catch(e){status(e.message,true);}}void init();
+async function init(){try{const data=await rpc('ui/initialize',{appInfo:{name:'codex-local-review',version:'0.5.8'},appCapabilities:{},protocolVersion:'2026-01-26'});if(['light','dark'].includes(data?.hostContext?.theme))document.documentElement.style.colorScheme=data.hostContext.theme;window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/size-changed',params:{height:900,width:document.documentElement.clientWidth}},'*');await run(async()=>{acceptWorkspace(await call('review_open'));if(workspace.activeProject&&workspace.projects.some(p=>p.id===workspace.activeProject))await openProject({id:workspace.activeProject});});}catch(e){status(e.message,true);}}void init();
 
 matchMedia('(max-width:1000px)').addEventListener('change',e=>{if(layoutChosen)return;layout=e.matches?'unified':'split';if(file&&!file.binary)renderCode();});
 
 let commitDraft=null,keywordLoading=false,keywordError='',keywordSequence=0,composerSequence=0,taskList=null,taskNotice='',committing=false,composerLoading=false;const commitTextDrafts=new Map(),keywordMemory=new Map();
 function updateComposerActions(){
- const visible=liveGit();$('commitWorkspace').hidden=!visible;if(!visible)return;
+ const visible=liveGit();$('commitWorkspace').hidden=!visible;reviewSurface.topInset();if(!visible)return;
  const task=commitDraft?.tasks.find(t=>t.id===$('commitTask').value),ready=commitDraft?.projectId===project?.id&&Boolean(commitDraft.token);
  $('confirmCommit').disabled=busy||!ready||!$('commitSummary').value.trim()||keywordLoading||Boolean(task&&!task.keyword);
  $('confirmCommit').textContent=busy?'正在处理…':!ready?(composerLoading?'正在准备提交…':'暂无可提交改动'):'提交暂存改动';
