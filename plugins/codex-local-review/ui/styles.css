@@ -35,7 +35,7 @@ small,.muted{font-size:12px;color:var(--muted)}
 .project-tab>button{background:transparent;border:0;border-radius:0;min-width:0;min-height:32px;padding:5px 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit}
 .project-tab>button.close-tab{padding:0 6px;width:25px;font-size:16px;color:var(--muted)}
 .project-tabs>.empty-list{padding:8px 10px}
-.workbench{display:grid;grid-template-columns:220px 290px minmax(0,1fr);min-height:0;min-width:0;position:relative}
+.workbench{display:grid;grid-template-columns:var(--project-sidebar-width,220px) 290px minmax(0,1fr);min-height:0;min-width:0;position:relative}
 .projects-column,.files-column{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;border-right:1px solid var(--border);background:var(--panel)}
 .files-column{background:light-dark(#fcfcfd,#20242b)}
 .section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:10px 14px;font-size:11px;color:var(--muted)}
@@ -95,8 +95,8 @@ dialog{width:min(680px,92vw);max-height:86vh;overflow:auto;padding:22px;color:va
 body[aria-busy=true] button{pointer-events:none;cursor:wait}body[aria-busy=true] .statusbar{color:var(--accent)}
 body[aria-busy=true] :is(button[data-path],button[data-project-id],button[data-sha],button[data-review-id],[role=tab],[data-scope],#changesTab,#commitsTab,#reviewsTab,#prevFile,#nextFile){pointer-events:auto;cursor:pointer}
 .diff-table.wrap .code-cell{white-space:pre-wrap!important;overflow-wrap:anywhere}.diff-table.wrap .code-cell code{white-space:pre-wrap;overflow-wrap:anywhere}
-@media(max-width:1280px){.topbar{gap:12px;padding-inline:12px}#projectTotal{display:none}.project-bar{max-width:310px;padding-left:12px}.workbench{grid-template-columns:190px 270px minmax(0,1fr)}}
-@media(max-width:1000px){.topbar{flex-wrap:wrap}.project-bar{max-width:none;min-width:170px}.topbar>.toolbar{margin-left:auto}.workbench{grid-template-columns:170px 240px minmax(0,1fr)}.review-banner #reviewDate{display:none}}
+@media(max-width:1280px){.topbar{gap:12px;padding-inline:12px}#projectTotal{display:none}.project-bar{max-width:310px;padding-left:12px}.workbench{grid-template-columns:var(--project-sidebar-width,190px) 270px minmax(0,1fr)}}
+@media(max-width:1000px){.topbar{flex-wrap:wrap}.project-bar{max-width:none;min-width:170px}.topbar>.toolbar{margin-left:auto}.workbench{grid-template-columns:var(--project-sidebar-width,170px) 240px minmax(0,1fr)}.review-banner #reviewDate{display:none}}
 @media(max-width:800px){.topbar{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 12px;padding:10px}.project-bar{min-width:0;border:0;padding:0}.project-bar label{display:none}.topbar>.toolbar{grid-column:1/-1;margin:0;gap:6px;flex-wrap:wrap}.topbar>.toolbar button{font-size:12px;min-height:30px}#projectSelect{max-width:none}.workbench{grid-template-columns:180px minmax(0,1fr)}.projects-column{display:none}body.project-drawer .projects-column{display:flex;position:absolute;z-index:40;inset:0 auto 0 0;width:min(310px,calc(100vw - 16px));box-shadow:8px 0 32px #0003}.project-drawer #projects{min-height:100px}.diff-toolbar{gap:7px;padding-inline:10px}.file-toolbar,.review-banner{padding-inline:12px}.section-heading{padding-inline:12px}}
 @media(max-width:520px){.brand h1{font-size:12px}.brand svg{width:18px}.version{font-size:9px}.brand{gap:6px}.topbar{gap:8px}.topbar>.toolbar button{font-size:11px;padding-inline:8px}.workbench{grid-template-columns:138px minmax(0,1fr)}.nav-tabs{padding:0 4px}.nav-tabs button{font-size:10px;padding-inline:2px}.scopes{margin:10px 7px}.scopes button{font-size:10px}.search-wrap{padding-inline:7px}.section-heading{padding-inline:8px}#repoName{font-size:12px}.branch{font-size:10px}.review-banner{gap:5px;flex-wrap:wrap}.review-banner button{padding-inline:6px;font-size:10px}.diff-toolbar .check{display:none}.diff-toolbar{gap:5px;padding-inline:7px}.diff-toolbar button{padding-inline:6px}#readonly{display:none}.welcome,.empty-state{padding:18px}.welcome h2,.empty-state h2{font-size:17px}.empty-state p{font-size:12px}.diff-table .number{width:28px}.number button{padding-right:3px}.code-cell{padding-inline:5px!important}.project-tab{max-width:180px}}
 
@@ -111,6 +111,7 @@ body[aria-busy=true] :is(button[data-path],button[data-project-id],button[data-s
 .commit-heading{display:flex;align-items:center;gap:10px;margin-bottom:10px;min-width:0}.commit-heading h2{font-size:13px;white-space:nowrap}.commit-heading>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px ui-monospace,monospace}.commit-heading button{font-size:11px;padding:3px 8px;min-height:26px}
 #gitCommitForm{display:grid;gap:8px}#commitSummary{min-height:68px;max-height:160px;resize:vertical;font-size:13px;background:var(--bg)}
 .commit-association{display:flex;align-items:center;gap:8px;min-width:0}.commit-association label{font-size:11px;color:var(--muted);white-space:nowrap}.commit-association select{flex:1;width:100%;font-size:12px;min-width:0}.commit-association button{font-size:11px}
+.commit-keyword{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);min-width:0}.commit-keyword code{flex:1 1 180px;min-width:0;max-height:72px;overflow:auto;overflow-wrap:anywhere;white-space:pre-wrap;font:11px/1.6 ui-monospace,Menlo,monospace}.commit-keyword button{margin-left:auto;min-height:28px;padding:3px 8px;font-size:11px}
 #commitTaskHint{font-size:11px;line-height:1.5;overflow-wrap:anywhere}#commitTaskHint:empty{display:none}
 .commit-submit-row{display:flex;align-items:center;justify-content:space-between;gap:10px}#confirmCommit{font-weight:600;min-width:126px;background:var(--accent);color:light-dark(#fff,#14223c);border-color:var(--accent)}#confirmCommit:hover{background:var(--accent);filter:brightness(.95)}#confirmCommit:disabled{opacity:.65}
 .commit-preview{font-size:11px;color:var(--muted)}.commit-preview summary{cursor:pointer}.commit-preview pre{font:11px/1.6 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text);padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px}#commitFiles{max-height:120px;overflow:auto;overflow-wrap:anywhere;padding-left:20px}#commitError{color:var(--red);font-size:12px;white-space:pre-wrap}#commitError:empty{display:none}
@@ -149,7 +150,8 @@ body[aria-busy=true] #reviewFullscreen{pointer-events:auto;cursor:pointer}
 
 /* Current branch occupies the same centre point regardless of sync-status length. */
 .git-command-bar{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);flex-wrap:nowrap}
-.git-command-bar #switchBranch{grid-column:2;grid-row:1;justify-self:center;max-width:100%;min-width:0}
+.git-command-bar #switchBranch{grid-column:2;grid-row:1;justify-self:center;display:flex;align-items:center;gap:10px;width:min(100%,520px);max-width:100%;min-width:0;min-height:36px;font-size:13px}
+.git-command-bar #switchBranch>span[aria-hidden]{flex:none}.git-command-bar #currentBranch{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}
 .git-command-bar #syncStatus{grid-column:1;grid-row:1;max-width:100%;min-width:0}
 .git-remote-actions{grid-column:3;grid-row:1;display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
 .history-filter{display:flex;align-items:center;gap:6px;min-width:0}.history-filter label{font-size:11px;color:var(--muted);flex:none}.history-filter select{flex:1;min-width:0;font-size:11px}.history-filter button{font-size:11px;padding-inline:6px}
@@ -178,7 +180,24 @@ body[aria-busy=true] #reviewFullscreen{pointer-events:auto;cursor:pointer}
 /* Anchored branch dropdown; the review beneath it remains interactive. */
 .branch-popover{position:fixed;inset:auto;margin:0;padding:0;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);box-shadow:0 8px 28px #0003;overflow:auto;max-width:calc(100vw - 16px)}
 .branch-picker-heading{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);background:var(--panel)}.branch-picker-heading h2{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.branch-picker-heading button{border:0;background:transparent;min-height:26px;padding:1px 7px;font-size:18px}
-#branchListView{display:flex;flex-direction:column;min-height:0}#branchListView[hidden]{display:none}#branchSearch{margin:10px;width:calc(100% - 20px);flex:none}#branchOptions{max-height:300px;max-height:min(300px,calc(100vh - 290px));overflow:auto;min-height:54px;padding:0 5px 5px}.branch-group{padding:6px 9px;font-size:10px;color:var(--muted)}
-.branch-option{display:flex;align-items:center;gap:9px;width:100%;min-width:0;text-align:left;border:0;border-radius:4px;padding:7px 9px;background:transparent;font-size:12px}.branch-option[aria-selected=true]{background:var(--selected);color:var(--accent)}.branch-kind{color:var(--muted);flex:none}.branch-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.branch-badge{font-size:10px;flex:none}
+#branchListView{display:flex;flex-direction:column;min-height:0}#branchListView[hidden]{display:none}#branchSearch{margin:10px;width:calc(100% - 20px);flex:none}#branchOptions{max-height:min(70vh,var(--branch-list-height,70vh));overflow:auto;min-height:54px;padding:0 5px 5px}.branch-group{padding:6px 9px;font-size:10px;color:var(--muted)}
+.branch-option{display:flex;align-items:center;gap:9px;width:100%;min-width:0;min-height:36px;text-align:left;border:0;border-radius:4px;padding:7px 9px;background:transparent;font-size:13px}.branch-option[aria-selected=true]{background:var(--selected);color:var(--accent)}.branch-kind{color:var(--muted);flex:none}.branch-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.branch-badge{font-size:10px;flex:none}
 #branchActions,#branchRemoteActions,#branchCreateForm{padding:12px}#branchActions[hidden],#branchRemoteActions[hidden],#branchCreateForm[hidden]{display:none}#branchActions>button{display:block;width:100%;min-width:0;text-align:left;border:0;background:transparent;padding:9px;border-radius:4px;white-space:normal;overflow-wrap:anywhere}#branchActions>button:hover,#branchActions>button:focus-visible{background:var(--selected)}.branch-source{font-size:11px;overflow-wrap:anywhere;margin-bottom:12px}#branchTrackForm,#branchCreateForm{display:grid;gap:9px}#branchTrackForm label,#branchCreateForm label{font-size:11px;color:var(--muted)}#branchTrackForm button,#branchCreateForm button{white-space:normal;text-align:left;overflow-wrap:anywhere;min-width:0}.branch-popover .muted{font-size:11px}#branchError:empty{display:none}#branchError{padding:8px 12px;font-size:12px;overflow-wrap:anywhere}body[aria-busy=true] #branchClose{pointer-events:auto;cursor:pointer}
-@media(max-height:550px){.branch-picker-heading{padding-block:4px}#branchOptions{max-height:110px}#branchSearch{margin-block:6px}}
+@media(max-height:550px){.branch-picker-heading{padding-block:4px}#branchSearch{margin-block:6px}}
+
+/* Toolbars use icons; names remain available to assistive technology and tooltips. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+button.icon-button{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:32px;height:32px;min-height:32px;padding:6px;gap:0}
+button.icon-button>svg{display:block;width:18px;height:18px;flex:none;pointer-events:none}
+.summary-file-actions .icon-button,.hunk-actions .icon-button,.toggle .icon-button,#reviewFullscreen.icon-button{width:28px;height:28px;min-height:28px;padding:5px}
+#reviewFullscreen.icon-button>svg{width:16px;height:16px}
+
+/* Keep the project grid cell when collapsed so the other panes retain their columns. */
+.projects-collapsed .projects-column{visibility:hidden}
+.sidebar-resize{position:absolute;inset:0 auto 0 calc(var(--project-sidebar-width,220px) - 3px);width:6px;z-index:6;cursor:col-resize;touch-action:none}
+.sidebar-resize::after{content:'';position:absolute;inset:0 auto 0 2px;width:2px;background:transparent;transition:background .12s}
+.sidebar-resize:hover::after,.sidebar-resize:focus-visible::after,.resizing-sidebar .sidebar-resize::after{background:var(--accent)}
+.sidebar-resize:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.resizing-sidebar{user-select:none}.resizing-sidebar *{cursor:col-resize!important}
+.projects-collapsed .sidebar-resize,.review-fullscreen .sidebar-resize{display:none}
+@media(max-width:800px){.sidebar-resize{display:none}}

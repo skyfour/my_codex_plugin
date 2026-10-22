@@ -16,7 +16,7 @@ async function run(fn,label='正在加载…'){
  if(busy)return;selectionSequence++;fileLoading=false;busy=true;updateBusy();$('reviewed').disabled=true;status(label);$('dialogError').textContent='';updateActions();
  try{await fn();status('就绪');}catch(e){status(e.message,true);if($('openDialog').open)$('dialogError').textContent=e.message;if($('settingsDialog').open)$('settingsError').textContent=e.message;if(liveGit())$('commitError').textContent=e.message;}finally{busy=false;updateBusy();$('reviewed').disabled=!file||file.binary||!project;updateActions();focusCommentEditor();const next=pendingNavigation;pendingNavigation=null;next?.();}
 }
-function acceptWorkspace(data){if(data.version&&data.version!=='0.5.9')status('插件后台仍是旧版本，请重开 Codex 后打开新工作台',true);for(const key of ['projects','reviews','activeProject','limits'])if(data[key]!==undefined)workspace[key]=data[key];renderProjects();renderReviews();}
+function acceptWorkspace(data){if(data.version&&data.version!=='0.5.10')status('插件后台仍是旧版本，请重开 Codex 后打开新工作台',true);for(const key of ['projects','reviews','activeProject','limits'])if(data[key]!==undefined)workspace[key]=data[key];renderProjects();renderReviews();}
 function projectCopy(p){const copy=el('span',undefined,'project-copy');copy.append(el('strong',(p.pinned?'◆ ':'')+p.name),el('small',p.path));return copy;}
 function renderProjects(){
  const filter=$('projectSearch').value.toLowerCase();$('projects').replaceChildren();for(const p of workspace.projects.filter(p=>(p.name+' '+p.path).toLowerCase().includes(filter))){const b=button('',()=>navigate(()=>openProject({id:p.id}),{projectId:null}));b.title=p.path;b.dataset.projectId=p.id;b.oncontextmenu=e=>{e.preventDefault();if(!busy)manage(p);};b.setAttribute('aria-current',String(project?.id===p.id));b.append(el('span','⌘','project-icon'),projectCopy(p));$('projects').append(b);}
@@ -31,7 +31,7 @@ function renderProjects(){
 async function remember(extra={}){if(!project)return;const selected=project;selected.state={...selected.state,...scope,file:reviewSurface.isSummary()?'':file?.path??'',lastReview:review?.id??null,...extra};const saved={...selected.state};await call('project_update',{id:selected.id,state:saved});const p=workspace.projects.find(p=>p.id===selected.id);if(p)p.state=saved;}
 async function closeProject(id){saveDraft();const active=project?.id===id,result=await call('project_close',{id});acceptWorkspace(result);if(active){project=null;repository=null;review=null;file=null;files=[];renderProjects();renderFiles();renderDetail();if(result.activeProject)await openProject({id:result.activeProject});}}
 async function openProject(args){
- leaveReviewContext();saveCommitText();reviewSurface.reset(true);const result=await call('project_open',args);project=result.project;repository=result.repository;commitDraft=null;composerSequence++;$('commitSummary').value=commitTextDrafts.get(project.id)?.summary??'';failedFile=null;selectedFiles.clear();acceptWorkspace(result);document.body.classList.remove('project-drawer');$('projectMenu').setAttribute('aria-expanded','false');$('openDialog').close();$('quickDialog').close();$('fileSearch').value='';$('commitSearch').value='';review=null;file=null;files=[];directory='';scope=project.isGit?{mode:'working'}:{mode:'files'};tab='changes';renderNavigation();renderFiles();renderDetail();
+ leaveReviewContext();saveCommitText();reviewSurface.reset(true);const result=await call('project_open',args);project=result.project;repository=result.repository;commitDraft=null;composerSequence++;$('commitSummary').value=commitTextDrafts.get(project.id)?.summary??'';failedFile=null;selectedFiles.clear();acceptWorkspace(result);sidebarLayout.closeDrawer();$('openDialog').close();$('quickDialog').close();$('fileSearch').value='';$('commitSearch').value='';review=null;file=null;files=[];directory='';scope=project.isGit?{mode:'working'}:{mode:'files'};tab='changes';renderNavigation();renderFiles();renderDetail();
  if(project.state?.lastReview){try{review=(await call('review_get',{id:project.state.lastReview})).review;scope={mode:review.mode,...(review.base&&review.base!==':'?{base:review.base}:{}),...(review.target?{target:review.target}:{})};files=review.files;tab='reviews';renderNavigation();renderFiles();await selectFile(project.state.file||files[0]?.path,Boolean(project.state.file));return;}catch{review=null;}}
  if(project.isGit&&['working','staged','unstaged','commits','commit'].includes(project.state?.mode))scope={mode:project.state.mode,...(project.state.base?{base:project.state.base}:{}),...(project.state.target?{target:project.state.target}:{})};
  if(scope.mode==='commit'){await showCommitHistory();renderProjects();return;}
@@ -150,7 +150,7 @@ function showOpen(){if(busy)return;$('dialogError').textContent='';$('openDialog
 async function nativeChoice(){if(busy)return;await run(async()=>{try{const result=await call('project_pick');acceptWorkspace(result);if(!result.canceled){$('openDialog').close();await openProject({id:result.activeProject});}}catch(e){$('openDialog').showModal();throw e;}},'请在系统窗口中选择项目文件夹…');}
 $('openProject').onclick=$('welcomeOpen').onclick=$('addProject').onclick=nativeChoice;
 $('projectSelect').onchange=()=>{const id=$('projectSelect').value;if(id)navigate(()=>openProject({id}),{projectId:null});};
-$('projectMenu').onclick=()=>{if(busy)return;if(matchMedia('(max-width:800px)').matches){const expanded=document.body.classList.toggle('project-drawer');$('projectMenu').setAttribute('aria-expanded',String(expanded));}else{$('projectSearch').focus();$('projectSearch').select();}};$('welcomeBrowse').onclick=$('browseProjects').onclick=()=>{showOpen();run(()=>browse());};
+$('projectMenu').onclick=()=>{if(!busy)sidebarLayout.toggle();};$('welcomeBrowse').onclick=$('browseProjects').onclick=()=>{showOpen();run(()=>browse());};
 $('nativePick').onclick=nativeChoice;
 $('pathForm').onsubmit=e=>{e.preventDefault();run(()=>openProject({path:$('project').value.trim()}));};
 for(const b of document.querySelectorAll('[data-close]'))b.onclick=()=>$(b.dataset.close).close();
@@ -204,7 +204,7 @@ function setReviewFullscreen(expanded){
  const visibleTop=rect.top+stickyHeight,views=top?horizontal.map(item=>item.node).filter(view=>{const r=view.getBoundingClientRect();return r.bottom>visibleTop&&r.top<rect.bottom;}):[];
  const visibleRows=views.flatMap(view=>[...view.querySelectorAll('tr[data-row]')]).map(node=>({node,rect:node.getBoundingClientRect()})).filter(row=>row.rect.bottom>visibleTop&&row.rect.top<rect.bottom);
  const line=visibleRows.find(row=>row.rect.top>=visibleTop)||visibleRows[0];
- document.body.classList.toggle('review-fullscreen',expanded);
+ document.body.classList.toggle('review-fullscreen',expanded);sidebarLayout.refresh();
  const toggle=$('reviewFullscreen');toggle.setAttribute('aria-pressed',String(expanded));toggle.querySelector('span').textContent=expanded?'退出全屏':'全屏审阅';toggle.title=expanded?'退出全屏审阅（Esc）':'展开审阅区；Esc 退出全屏';
  scroller.scrollTop=top;scroller.scrollLeft=left;
  const nextStickyHeight=reviewSurface.isSummary()?reviewSurface.topInset()+(matchMedia('(min-width:801px)').matches?column.querySelector('.summary-file-header')?.offsetHeight||0:0):0;
@@ -216,23 +216,29 @@ function setReviewFullscreen(expanded){
  }
 }
 $('reviewFullscreen').onclick=()=>setReviewFullscreen(!document.body.classList.contains('review-fullscreen'));
-document.addEventListener('keydown',e=>{if(branchPickerOpen()){if(e.key==='Escape'){e.preventDefault();closeBranchPicker(true);}if((e.metaKey||e.ctrlKey)&&['o','p','r'].includes(e.key.toLowerCase()))e.preventDefault();return;}if(document.querySelector('dialog[open]')){if((e.metaKey||e.ctrlKey)&&['o','p','r'].includes(e.key.toLowerCase()))e.preventDefault();return;}if(e.key==='Escape'){if(document.body.classList.contains('review-fullscreen')){e.preventDefault();setReviewFullscreen(false);}document.body.classList.remove('project-drawer');$('projectMenu').setAttribute('aria-expanded','false');}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='o'){e.preventDefault();nativeChoice();}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='p'){e.preventDefault();showQuick();}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='r'){e.preventDefault();$('refresh').click();}else if(!document.querySelector('dialog[open]')&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!e.target.isContentEditable){if((e.altKey&&['ArrowDown','ArrowUp'].includes(e.key))||(!e.metaKey&&!e.ctrlKey&&!e.altKey&&['j','k'].includes(e.key.toLowerCase()))){e.preventDefault();moveFile(e.key==='ArrowDown'||e.key.toLowerCase()==='j'?1:-1);}}});
-async function init(){try{const data=await rpc('ui/initialize',{appInfo:{name:'codex-local-review',version:'0.5.9'},appCapabilities:{},protocolVersion:'2026-01-26'});if(['light','dark'].includes(data?.hostContext?.theme))document.documentElement.style.colorScheme=data.hostContext.theme;window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/size-changed',params:{height:900,width:document.documentElement.clientWidth}},'*');await run(async()=>{acceptWorkspace(await call('review_open'));if(workspace.activeProject&&workspace.projects.some(p=>p.id===workspace.activeProject))await openProject({id:workspace.activeProject});});}catch(e){status(e.message,true);}}void init();
+document.addEventListener('keydown',e=>{if(branchPickerOpen()){if(e.key==='Escape'){e.preventDefault();closeBranchPicker(true);}if((e.metaKey||e.ctrlKey)&&['o','p','r'].includes(e.key.toLowerCase()))e.preventDefault();return;}if(document.querySelector('dialog[open]')){if((e.metaKey||e.ctrlKey)&&['o','p','r'].includes(e.key.toLowerCase()))e.preventDefault();return;}if(e.key==='Escape'){if(document.body.classList.contains('review-fullscreen')){e.preventDefault();setReviewFullscreen(false);}sidebarLayout.closeDrawer();}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='o'){e.preventDefault();nativeChoice();}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='p'){e.preventDefault();showQuick();}else if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='r'){e.preventDefault();$('refresh').click();}else if(!document.querySelector('dialog[open]')&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)&&!e.target.isContentEditable){if((e.altKey&&['ArrowDown','ArrowUp'].includes(e.key))||(!e.metaKey&&!e.ctrlKey&&!e.altKey&&['j','k'].includes(e.key.toLowerCase()))){e.preventDefault();moveFile(e.key==='ArrowDown'||e.key.toLowerCase()==='j'?1:-1);}}});
+async function init(){try{const data=await rpc('ui/initialize',{appInfo:{name:'codex-local-review',version:'0.5.10'},appCapabilities:{},protocolVersion:'2026-01-26'});if(['light','dark'].includes(data?.hostContext?.theme))document.documentElement.style.colorScheme=data.hostContext.theme;window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/size-changed',params:{height:900,width:document.documentElement.clientWidth}},'*');await run(async()=>{acceptWorkspace(await call('review_open'));if(workspace.activeProject&&workspace.projects.some(p=>p.id===workspace.activeProject))await openProject({id:workspace.activeProject});});}catch(e){status(e.message,true);}}void init();
 
 matchMedia('(max-width:1000px)').addEventListener('change',e=>{if(layoutChosen)return;layout=e.matches?'unified':'split';if(file&&!file.binary)renderCode();});
 
 let commitDraft=null,keywordLoading=false,keywordError='',keywordSequence=0,composerSequence=0,taskList=null,taskNotice='',committing=false,composerLoading=false;const commitTextDrafts=new Map(),keywordMemory=new Map();
+function hasCommitKeyword(text,keyword){return Boolean(keyword)&&text.split('\n').includes(keyword);}
+function completeCommitMessage(text,keyword){const summary=text.trim();return summary+(keyword&&!hasCommitKeyword(summary,keyword)?(summary?'\n\n':'')+keyword:'');}
 function updateComposerActions(){
  const visible=liveGit();$('commitWorkspace').hidden=!visible;reviewSurface.topInset();if(!visible)return;
- const task=commitDraft?.tasks.find(t=>t.id===$('commitTask').value),ready=commitDraft?.projectId===project?.id&&Boolean(commitDraft.token);
- $('confirmCommit').disabled=busy||!ready||!$('commitSummary').value.trim()||keywordLoading||Boolean(task&&!task.keyword);
+ const task=commitDraft?.tasks.find(t=>t.id===$('commitTask').value),ready=commitDraft?.projectId===project?.id&&Boolean(commitDraft.token),keyword=task?.keyword??'',text=$('commitSummary').value,applied=hasCommitKeyword(text,keyword);
+ $('confirmCommit').disabled=busy||!ready||!text.trim()||keywordLoading||Boolean(task&&!keyword)||$('commitMessage').textContent.length>10000;
  $('confirmCommit').textContent=busy?'正在处理…':!ready?(composerLoading?'正在准备提交…':'暂无可提交改动'):'提交暂存改动';
  $('refreshCommit').disabled=busy;$('commitTask').disabled=busy||!commitDraft;$('commitSummary').disabled=committing;$('retryKeyword').disabled=busy||keywordLoading;
+ $('commitKeywordRow').hidden=!keyword||keywordLoading;$('commitKeywordText').textContent=keyword;
+ $('applyCommitKeyword').disabled=busy||committing||keywordLoading||!keyword||applied||(text?text+'\n\n'+keyword:keyword).length>$('commitSummary').maxLength;
+ $('applyCommitKeyword').textContent=applied?'已应用':'应用到提交说明';$('applyCommitKeyword').title=applied?'关键字已在提交说明中':'将完整 TAPD 关键字作为独立一行加入提交说明，保留已有正文';
 }
 function buildCommitMessage(){
- const t=commitDraft?.tasks.find(t=>t.id===$('commitTask').value),summary=$('commitSummary').value.trim();$('commitMessage').textContent=summary+(t?.keyword?'\n\n'+t.keyword:'');
- $('commitTaskHint').textContent=keywordLoading?'正在从 TAPD 获取源码关键字…':keywordError|| (t?'已自动关联 TAPD · 完整关键字见下方预览':commitDraft?.notice??'选择任务后自动获取源码关键字，无需切换看板。');
- $('commitTaskHint').classList.toggle('error',Boolean(keywordError));$('retryKeyword').hidden=!keywordError;updateComposerActions();
+ const t=commitDraft?.tasks.find(t=>t.id===$('commitTask').value),text=$('commitSummary').value;const message=completeCommitMessage(text,t?.keyword);$('commitMessage').textContent=message;
+ const tooLong=message.length>10000;
+ $('commitTaskHint').textContent=keywordLoading?'正在从 TAPD 获取源码关键字…':keywordError||(tooLong?'完整提交信息超过 10000 字，请缩短提交说明。':t?'已自动关联 TAPD · '+(hasCommitKeyword(text,t.keyword)?'关键字已在提交说明中':'可一键应用到提交说明；提交时会自动携带关键字'):commitDraft?.notice??'选择任务后自动获取源码关键字，无需切换看板。');
+ $('commitTaskHint').classList.toggle('error',Boolean(keywordError)||tooLong);$('retryKeyword').hidden=!keywordError;updateComposerActions();
 }
 async function refreshComposer({includeTasks=true}={}){
  if(!liveGit())return;const projectId=project.id,request=++composerSequence;keywordSequence++;keywordLoading=false;keywordError='';composerLoading=true;
@@ -245,6 +251,7 @@ async function refreshComposer({includeTasks=true}={}){
  $('commitRepo').textContent=data.branch;$('commitRepo').title=data.root+' · '+data.branch;$('commitTask').replaceChildren(new Option('不关联 TAPD 任务',''));
  for(const t of data.tasks){const option=new Option(t.title+' · '+t.account+' / '+t.sourceId,t.id);$('commitTask').append(option);}
  const saved=commitTextDrafts.get(projectId);$('commitSummary').value=saved?.summary??'';if(saved?.taskId&&data.tasks.some(t=>t.id===saved.taskId))$('commitTask').value=saved.taskId;
+ if(saved?.taskId&&saved.taskId!==$('commitTask').value){clearAppliedCommitKeyword();saveCommitText();}
  $('commitError').textContent='';$('commitFiles').replaceChildren(...data.files.map(f=>el('li',f.path)));$('commitCount').textContent=data.files.length?data.files.length+' 个已暂存文件':'先 Stage 要提交的文件';buildCommitMessage();reviewSurface.restorePosition(position);
  if($('commitTask').value&&!keywordMemory.has($('commitTask').value))void loadCommitKeyword();
  }catch(e){if(request!==composerSequence||project?.id!==projectId||!liveGit())return;commitDraft=null;$('commitRepo').textContent=repository?.branch??'';$('commitError').textContent=e.message;$('commitCount').textContent='暂时无法提交';updateComposerActions();}
@@ -253,14 +260,19 @@ async function refreshComposer({includeTasks=true}={}){
 async function loadCommitKeyword(){
  const taskId=$('commitTask').value,projectId=commitDraft?.projectId,request=++keywordSequence;keywordError='';keywordLoading=false;if(!taskId){buildCommitMessage();return;}
  const task=commitDraft?.tasks.find(t=>t.id===taskId);if(!task)return;task.keyword='';keywordLoading=true;buildCommitMessage();
- try{const data=await call('commit_task_keyword',{taskId});if(request!==keywordSequence||project?.id!==projectId||$('commitTask').value!==taskId)return;task.keyword=data.keyword;keywordMemory.set(taskId,data.keyword);}
+ try{const data=await call('commit_task_keyword',{taskId});if(request!==keywordSequence||project?.id!==projectId||$('commitTask').value!==taskId)return;const owned=commitTextDrafts.get(projectId)?.appliedKeyword;if(owned&&owned!==data.keyword){clearAppliedCommitKeyword();saveCommitText();}task.keyword=data.keyword;keywordMemory.set(taskId,data.keyword);}
  catch(e){if(request!==keywordSequence||project?.id!==projectId)return;keywordError=e.message;}
  finally{if(request===keywordSequence&&project?.id===projectId){keywordLoading=false;buildCommitMessage();}}
 }
-function saveCommitText(){if(project?.id)commitTextDrafts.set(project.id,{summary:$('commitSummary').value,taskId:$('commitTask').value});}
-$('commitTask').onchange=()=>{const task=commitDraft?.tasks.find(t=>t.id===$('commitTask').value);if(task&&!$('commitSummary').value.trim())$('commitSummary').value=task.title;saveCommitText();void loadCommitKeyword();};$('commitSummary').oninput=()=>{saveCommitText();buildCommitMessage();};$('retryKeyword').onclick=()=>void loadCommitKeyword();$('refreshCommit').onclick=()=>run(()=>refreshComposer());
+function saveCommitText({appliedKeyword}={}){if(project?.id){const saved=commitTextDrafts.get(project.id),summary=$('commitSummary').value,owned=appliedKeyword??saved?.appliedKeyword??'';commitTextDrafts.set(project.id,{summary,taskId:commitDraft?.projectId===project.id?$('commitTask').value:saved?.taskId??'',appliedKeyword:hasCommitKeyword(summary,owned)?owned:''});}}
+function clearAppliedCommitKeyword(){
+ const saved=commitTextDrafts.get(project?.id),keyword=saved?.appliedKeyword;if(!keyword)return;const text=$('commitSummary').value,suffix='\n\n'+keyword;
+ if(text===keyword)$('commitSummary').value='';else if(text.endsWith(suffix))$('commitSummary').value=text.slice(0,-suffix.length);else{const lines=text.split('\n'),index=lines.lastIndexOf(keyword);if(index>=0){lines.splice(index,1);$('commitSummary').value=lines.join('\n');}}saved.appliedKeyword='';
+}
+$('applyCommitKeyword').onclick=()=>{const task=commitDraft?.tasks.find(t=>t.id===$('commitTask').value);if($('applyCommitKeyword').disabled||commitDraft?.projectId!==project?.id||!task?.keyword)return;const input=$('commitSummary'),start=input.selectionStart,end=input.selectionEnd;input.value=input.value?input.value+'\n\n'+task.keyword:task.keyword;saveCommitText({appliedKeyword:task.keyword});buildCommitMessage();input.focus({preventScroll:true});input.setSelectionRange(start,end);};
+$('commitTask').onchange=()=>{if(commitTextDrafts.get(project?.id)?.taskId!==$('commitTask').value)clearAppliedCommitKeyword();const task=commitDraft?.tasks.find(t=>t.id===$('commitTask').value);if(task&&!$('commitSummary').value.trim())$('commitSummary').value=task.title;saveCommitText();void loadCommitKeyword();};$('commitSummary').oninput=()=>{saveCommitText();buildCommitMessage();};$('retryKeyword').onclick=()=>void loadCommitKeyword();$('refreshCommit').onclick=()=>run(()=>refreshComposer());
 $('gitCommitForm').onsubmit=e=>{e.preventDefault();if(busy||!commitDraft||$('confirmCommit').disabled)return;const draft=commitDraft,message=$('commitMessage').textContent,taskId=$('commitTask').value;committing=true;run(async()=>{try{
- const result=await call('commit_execute',{id:draft.projectId,token:draft.token,message,...(taskId?{taskId}:{})});commitTextDrafts.delete(draft.projectId);commitDraft=null;keywordSequence++;$('commitSummary').value='';
+ const result=await call('commit_execute',{id:draft.projectId,token:draft.token,message,...(taskId?{taskId}:{})});commitTextDrafts.set(draft.projectId,{summary:'',taskId,appliedKeyword:''});commitDraft=null;keywordSequence++;$('commitSummary').value='';
  try{await openProject({id:draft.projectId});}catch(e){if(e.code!=='FILE_LIMIT')throw Error('已提交 '+result.commit.slice(0,8)+'，但刷新失败：'+e.message);}$('commitResult').textContent='已提交 '+result.commit.slice(0,8)+' · '+result.branch;
  }finally{committing=false;updateComposerActions();}},'正在提交，请等待 Git hooks 完成…');};
 
