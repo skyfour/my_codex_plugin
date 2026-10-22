@@ -134,3 +134,15 @@ body[aria-busy=true] :is(button[data-path],button[data-project-id],button[data-s
 .summary-file{min-width:0}.summary-file-header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:42px;padding:6px 12px;background:var(--selected);border-bottom:1px solid var(--border);position:sticky;top:37px;z-index:3}.summary-file-toggle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:left;border:0;background:transparent;font:12px/1.6 ui-monospace,Menlo,monospace;padding:4px 0}.summary-file-actions{display:flex;align-items:center;gap:6px;flex:none}.summary-file-actions .check{font-size:11px;margin-left:6px}.summary-file-body{min-height:50px}.summary-loading,.summary-error{padding:16px;margin:0;color:var(--muted);font-size:12px}.summary-error{color:var(--red)}
 .diff-view{overflow-x:auto;min-width:0}.diff-hunk-header{display:flex;align-items:center;gap:10px;min-width:0}.diff-hunk-header .hunk-actions{margin-left:auto;float:none;flex:none}.context-toggle{font-size:10px;min-height:25px;padding:2px 7px;border-color:transparent;background:transparent}.hunk-location{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.change-location td{padding:5px 10px!important}
 @media(max-width:800px){.summary-file-header{flex-wrap:wrap;gap:4px;padding:6px 10px}.summary-file-toggle{flex-basis:100%}.summary-file-actions{margin-left:auto}.summary-section-header{flex-wrap:wrap;gap:6px}.diff-hunk-header{flex-wrap:wrap;gap:5px}.diff-hunk-header .hunk-actions{margin-left:auto}.summary-file-header{position:static}.detail-tabs button{font-size:11px;padding-inline:9px;max-width:180px}}
+
+/* Expand the existing review pane without detaching its content or hidden navigation. */
+.detail-header{display:flex;align-items:center;flex:none;height:37px;min-width:0;position:sticky;top:0;z-index:5;background:var(--panel);border-bottom:1px solid var(--border)}
+.detail-header .detail-tabs{flex:1;min-width:0;height:36px;min-height:0;position:static;border-bottom:0}
+#reviewFullscreen{display:flex;align-items:center;gap:5px;margin:3px 6px;min-height:28px;padding:3px 7px;font-size:11px}
+#reviewFullscreen .collapse-icon,.review-fullscreen #reviewFullscreen .expand-icon{display:none}
+.review-fullscreen #reviewFullscreen .collapse-icon{display:initial}
+body[aria-busy=true] #reviewFullscreen{pointer-events:auto;cursor:pointer}
+.review-fullscreen .app{grid-template-rows:minmax(0,1fr) 26px}
+.review-fullscreen :is(.topbar,.project-tabs,.git-command-bar,.projects-column,.files-column){display:none!important}
+.review-fullscreen .workbench{grid-row:1;grid-template-columns:minmax(0,1fr)}
+.review-fullscreen .statusbar{grid-row:2}

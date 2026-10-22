@@ -25,7 +25,7 @@ export function createDiffView({value,hunks,rows:preparedRows,layout='split',wra
 }
 
 export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk,markReviewed,stageReviewed,comment,bulk}){
- const container=$('code'),tabs=$('detailTabs'),column=document.querySelector('.detail-column');
+ const container=$('code'),tabs=$('detailTabs'),header=$('detailHeader'),column=document.querySelector('.detail-column');
  const summaryContainer=el('div'),fileContainer=el('div');summaryContainer.dataset.reviewSummary='';fileContainer.dataset.reviewFileView='';container.replaceChildren(summaryContainer);
  let active={kind:'summary'},signature='',generation=0,observer=null,loadedBytes=0,lastFull=false,activeReads=0,cacheOwner='',summaryScroll=0,interaction=0,positionFollow=null;
  const readWaiters=[],cards=new Map(),cardNodes=new Map(),sectionsByMode=new Map(),collapsed=new Set(),options=new Map(),cache=new Map(),loads=new WeakMap();
@@ -45,13 +45,13 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
  function capturePosition({preferFocus=true}={}){
   if(active.kind!=='summary'||!summaryContainer.childElementCount)return null;
   if(positionFollow?.interaction===interaction&&positionFollow.owner===cacheOwner)return positionFollow;
-  const viewport=column.getBoundingClientRect(),top=viewport.top+tabs.getBoundingClientRect().height;
+  const viewport=column.getBoundingClientRect(),top=viewport.top+header.getBoundingClientRect().height;
   const focused=preferFocus?document.activeElement?.closest('[data-summary-path]'):null;
   const visibleCards=[...summaryContainer.querySelectorAll('[data-summary-path]')];
   const card=focused&&cards.has(focused)?focused:visibleCards.find(c=>{const r=c.getBoundingClientRect();return r.bottom>top&&r.top<viewport.bottom;});
   if(!card)return {interaction,owner:cacheOwner,scroll:column.scrollTop};
   const ctx=cards.get(card),siblings=visibleCards.filter(node=>cards.get(node)?.mode===ctx.mode).map(node=>({node,path:cards.get(node).path})),index=siblings.findIndex(c=>c.node===card),rect=card.getBoundingClientRect();
-  return {interaction,owner:cacheOwner,mode:ctx.mode,path:ctx.path,offset:rect.top-viewport.top,replacementOffset:Math.max(tabs.getBoundingClientRect().height+8,card.querySelector('.summary-file-header').getBoundingClientRect().top-viewport.top),next:siblings.slice(index+1).map(c=>c.path),previous:siblings.slice(0,index).reverse().map(c=>c.path),scroll:column.scrollTop};
+  return {interaction,owner:cacheOwner,mode:ctx.mode,path:ctx.path,offset:rect.top-viewport.top,replacementOffset:Math.max(header.getBoundingClientRect().height+8,card.querySelector('.summary-file-header').getBoundingClientRect().top-viewport.top),next:siblings.slice(index+1).map(c=>c.path),previous:siblings.slice(0,index).reverse().map(c=>c.path),scroll:column.scrollTop};
  }
  function keepPosition(){
   const token=positionFollow;if(!token||token.interaction!==interaction||token.owner!==cacheOwner||active.kind!=='summary')return;
@@ -134,6 +134,6 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
   if(!summaryContainer.childElementCount){const empty=el('div',undefined,'empty-state');empty.append(el('h2',s.scope.mode==='working'?'工作区干净':'当前范围没有文件差异'),el('p','切换范围或刷新，查看最新内容。'));summaryContainer.append(empty);}
   restorePosition(position);busy(s.busy);
  }
- async function reveal(path,mode,expectedInteraction=interaction){if(active.kind!=='summary'||expectedInteraction!==interaction)return;const card=cardNodes.get(key({path,mode}))||[...cards.keys()].find(c=>cards.get(c).path===path);if(!card)return;const ctx=cards.get(card),token=generation;restorePosition({interaction,owner:cacheOwner,mode:ctx.mode,path:ctx.path,offset:tabs.getBoundingClientRect().height+8,replacementOffset:tabs.getBoundingClientRect().height+8,scroll:column.scrollTop});card.querySelector('[data-collapse-file]')?.focus({preventScroll:true});if(!collapsed.has(key(ctx)))await load(card,ctx);if(token===generation&&expectedInteraction===interaction)keepPosition();}
+ async function reveal(path,mode,expectedInteraction=interaction){if(active.kind!=='summary'||expectedInteraction!==interaction)return;const card=cardNodes.get(key({path,mode}))||[...cards.keys()].find(c=>cards.get(c).path===path);if(!card)return;const ctx=cards.get(card),token=generation;restorePosition({interaction,owner:cacheOwner,mode:ctx.mode,path:ctx.path,offset:header.getBoundingClientRect().height+8,replacementOffset:header.getBoundingClientRect().height+8,scroll:column.scrollTop});card.querySelector('[data-collapse-file]')?.focus({preventScroll:true});if(!collapsed.has(key(ctx)))await load(card,ctx);if(token===generation&&expectedInteraction===interaction)keepPosition();}
  return {render,reset,summary,activate,reveal,capturePosition,restorePosition,fileContainer,get activeContainer(){return active.kind==='summary'?summaryContainer:fileContainer;},interactionToken:()=>interaction,isSummary:()=>active.kind==='summary',busy};
 }
