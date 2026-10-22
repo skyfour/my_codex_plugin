@@ -3,8 +3,9 @@ let branchPickerState=null;
 function branchPickerOpen(){return $('branchPopover').matches(':popover-open');}
 function closeBranchPicker(restoreFocus=false){if(branchPickerOpen())$('branchPopover').hidePopover();$('switchBranch').setAttribute('aria-expanded','false');if(restoreFocus)$('switchBranch').focus({preventScroll:true});}
 function positionBranchPicker(){
- if(!branchPickerOpen())return;const panel=$('branchPopover'),anchor=$('switchBranch').getBoundingClientRect(),width=Math.min(520,innerWidth-16),top=Math.min(anchor.bottom+6,Math.max(8,innerHeight-180));
- panel.style.width=width+'px';panel.style.left=Math.max(8,Math.min(innerWidth-width-8,anchor.left+anchor.width/2-width/2))+'px';panel.style.top=top+'px';panel.style.maxHeight=Math.max(100,innerHeight-top-8)+'px';
+ if(!branchPickerOpen())return;const panel=$('branchPopover'),anchor=$('switchBranch').getBoundingClientRect(),width=Math.min(1120,Math.max(640,innerWidth*.6),innerWidth-24),top=Math.min(anchor.bottom+6,Math.max(8,innerHeight-180)),height=Math.max(100,innerHeight-top-8);
+ panel.style.width=width+'px';panel.style.left=Math.max(12,Math.min(innerWidth-width-12,anchor.left+anchor.width/2-width/2))+'px';panel.style.top=top+'px';panel.style.maxHeight=height+'px';
+ if(!$('branchListView').hidden){const inset=$('branchOptions').getBoundingClientRect().top-panel.getBoundingClientRect().top;panel.style.setProperty('--branch-list-height',Math.max(54,height-inset-2)+'px');}
 }
 function remoteBranchSuffix(ref){const remote=[...(gitStatus?.remotes??[])].sort((a,b)=>b.length-a.length).find(name=>ref.startsWith(`refs/remotes/${name}/`));return remote?ref.slice(`refs/remotes/${remote}/`.length):'';}
 function openBranchPicker(){
