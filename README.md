@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | [任务看板](plugins/codex-task-panel/README.md) | 从 TAPD 选择导入任务，安排泳道进度，关联 Codex 会话 | 0.4.7 |
 | [API 调试台](plugins/codex-api-client/README.md) | 管理 HTTP 请求、集合与环境，整体备份迁移，执行脚本与断言 | 0.2.1 |
-| [本地代码审查](plugins/codex-local-review/README.md) | 浏览差异、添加行内批注，以及暂存、提交、拉取和推送 Git 改动 | 0.5.6 |
+| [本地代码审查](plugins/codex-local-review/README.md) | 浏览差异、添加行内批注，以及暂存、提交、拉取和推送 Git 改动 | 0.5.7 |
 | [DBX 数据库工作台](plugins/dbx/README.md) | 在 Codex 内使用 DBX 工作台，管理连接、查询数据库 | 0.6.39 |
 
 ## 快速开始
