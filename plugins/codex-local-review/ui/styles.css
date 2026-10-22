@@ -158,3 +158,19 @@ body[aria-busy=true] #reviewFullscreen{pointer-events:auto;cursor:pointer}
 #historyDialog{width:min(520px,calc(100vw - 24px))}#historyBranches{max-height:40vh;overflow:auto;margin-block:12px}#historyBranches h3{font-size:11px;color:var(--muted);margin:12px 0 6px}#historyBranches label{display:flex;align-items:center;gap:9px;min-height:34px;padding:5px 7px;border-radius:4px;cursor:pointer}#historyBranches label:hover{background:var(--selected)}#historyBranches label>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#historyBranches input{flex:none}.history-dialog-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.history-dialog-footer>span{margin-right:auto}
 @media(max-width:800px){.git-command-bar{grid-template-columns:minmax(0,1fr) auto;padding-inline:10px}.git-command-bar #switchBranch{grid-column:1}.git-remote-actions{grid-column:2;gap:6px}.history-filter{flex-wrap:wrap}.history-filter label{display:none}}
 @media(max-width:520px){.git-command-bar button{font-size:11px;padding-inline:6px}.git-remote-actions{gap:4px}.history-filter{gap:3px}.history-filter button{font-size:10px;padding-inline:4px}}
+
+/* Comment rows decorate the existing difference table without replacing code. */
+.number button{position:relative}.number button::before{content:'+';position:absolute;left:2px;top:3px;width:12px;height:15px;line-height:15px;border-radius:3px;font:12px/15px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--accent);background:var(--selected);opacity:0}
+.diff-table tr:hover .number button::before,.number button:focus-visible::before{opacity:1}
+.diff-table .annotation-row>td{height:auto;white-space:normal;overflow:visible;padding:8px 10px;vertical-align:top;background:var(--panel);border-bottom:1px solid var(--border);font:12px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.diff-table.split .annotation-row>td:first-child{border-right:1px solid var(--border)}
+.diff-table .annotation-row>td.annotation-empty{padding:0;background:var(--bg)}
+.inline-comment{min-width:0;max-width:100%;padding:10px 12px;margin-bottom:8px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:6px;background:var(--bg);overflow-wrap:anywhere}
+.inline-comment:last-child{margin-bottom:0}.inline-comment[data-severity=blocking]{border-left-color:var(--red)}
+.inline-comment-heading{display:flex;align-items:center;flex-wrap:wrap;gap:5px 10px;margin-bottom:5px;min-width:0}.inline-comment-heading strong{font-size:11px;color:var(--text)}
+.inline-comment-location{font-size:10px;color:var(--muted)}.inline-comment-delete{margin-left:auto;min-height:24px;padding:2px 6px;font-size:10px}
+.inline-comment-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.comment .comment-jump{float:none;display:block;max-width:calc(100% - 52px);text-align:left;white-space:normal;overflow-wrap:anywhere;font-size:11px;line-height:1.5}
+.annotation-row #commentForm{padding:12px;border:1px solid var(--accent);border-radius:6px;background:var(--bg);min-width:0;max-width:100%;font:12px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.annotation-row #commentForm>.toolbar{flex-wrap:wrap}.annotation-row #commentForm #anchor{min-width:0;overflow-wrap:anywhere;white-space:normal;font-size:11px}.annotation-row #commentForm textarea{margin:8px 0;min-height:78px;max-height:240px;resize:vertical}.annotation-row #commentForm select{min-width:0;max-width:100%;margin-left:auto}
+@media(max-width:520px){.diff-table .annotation-row>td{padding:6px}.inline-comment{padding:8px}.annotation-row #commentForm{padding:8px}.annotation-row #commentForm .toolbar{gap:5px}.annotation-row #commentForm button{font-size:11px;padding-inline:7px}}
