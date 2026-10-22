@@ -20,7 +20,7 @@
 
 ## 分支与历史范围
 
-Git 命令栏中央是当前工作分支入口，右侧保留 Fetch / Pull / Push。Sublime Merge 的[Header 说明](https://www.sublimemerge.com/docs/themes)将当前分支信息放在中央；它的[分支可见性](https://www.sublimemerge.com/blog/sublime-merge-build-1070)与 checkout 是独立操作。本插件按同样区分处理历史范围：
+Git 命令栏中央是当前工作分支下拉入口，右侧保留 Fetch / Pull / Push。下拉为锚定的非模态 popover，支持搜索、方向键、Enter 与 Esc，底层审阅仍可操作；不弹出分支确认对话框。选择本地分支直接执行受令牌保护的切换，远端分支在同一面板中选择本地跟踪、改名跟踪或分离 HEAD。新建分支也沿用面板内表单。同名本地分支不会被覆盖，提供显式切换入口。操作失败保留选择和名称，关闭下拉不取消已经开始的 Git 操作；项目切换后旧结果不会回填新项目。Sublime Merge 的[Header 说明](https://www.sublimemerge.com/docs/themes)将当前分支信息放在中央；它的[分支可见性](https://www.sublimemerge.com/blog/sublime-merge-build-1070)与 checkout 是独立操作。本插件按同样区分处理历史范围：
 
 - 当前分支：显示当前 HEAD 可达的历史，包含共同祖先；不是与某个基线比较后只取独有提交。detached HEAD 沿用当前提交；未产生首次提交的分支显示空历史。
 - 全部分支：合并本地、远程分支以及当前 HEAD 的历史；排除仅由标签或 stash 引用的提交。
@@ -75,3 +75,5 @@ npm run test:local-review-ui
 0.5.5 加入 `scripts/check-local-review-history.mjs`；完整代码审查浏览器套件包含十一组，新增回归验证分叉历史、全部／指定分支并集、HEAD 标记、范围切换保留 DOM 与草稿、真实与外部 checkout、已保存分支失效及窄屏操作。后端同时验证完整 refs 白名单、超过 200 个分支、detached／unborn、每项目持久化、拓扑排序和标签／stash 排除。
 
 0.5.6 加入 `scripts/check-local-review-annotations.mjs` 与 `scripts/check-local-review-annotation-identity.mjs`；完整套件包含十三组。新增批注检查覆盖真实旧／新行号、Summary 原位置、保存前后代码 DOM 与计算次数、纯文本显示、持久化与导出、多锚点草稿、跨 commit 隔离、保存门控与失败重试、分页／折叠定位、删除和暗色窄屏全屏；身份检查验证原预览过期拒绝，以及部分暂存两种比较各自保存。
+
+0.5.7 加入 `scripts/check-local-review-branch-dropdown.mjs`；完整套件包含十四组。覆盖非模态和外部点击、本地与远端分支、同名不同 SHA、跟踪与分离检出、200 条之外搜索、键盘、脏工作区、失效令牌、等待期间关闭、失败恢复、跨项目隔离和深浅窄屏操作。
