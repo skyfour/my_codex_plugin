@@ -35,7 +35,7 @@ small,.muted{font-size:12px;color:var(--muted)}
 .project-tab>button{background:transparent;border:0;border-radius:0;min-width:0;min-height:32px;padding:5px 12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit}
 .project-tab>button.close-tab{padding:0 6px;width:25px;font-size:16px;color:var(--muted)}
 .project-tabs>.empty-list{padding:8px 10px}
-.workbench{display:grid;grid-template-columns:220px 290px minmax(0,1fr);min-height:0;min-width:0;position:relative}
+.workbench{display:grid;grid-template-columns:var(--project-sidebar-width,220px) 290px minmax(0,1fr);min-height:0;min-width:0;position:relative}
 .projects-column,.files-column{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;border-right:1px solid var(--border);background:var(--panel)}
 .files-column{background:light-dark(#fcfcfd,#20242b)}
 .section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:10px 14px;font-size:11px;color:var(--muted)}
@@ -95,8 +95,8 @@ dialog{width:min(680px,92vw);max-height:86vh;overflow:auto;padding:22px;color:va
 body[aria-busy=true] button{pointer-events:none;cursor:wait}body[aria-busy=true] .statusbar{color:var(--accent)}
 body[aria-busy=true] :is(button[data-path],button[data-project-id],button[data-sha],button[data-review-id],[role=tab],[data-scope],#changesTab,#commitsTab,#reviewsTab,#prevFile,#nextFile){pointer-events:auto;cursor:pointer}
 .diff-table.wrap .code-cell{white-space:pre-wrap!important;overflow-wrap:anywhere}.diff-table.wrap .code-cell code{white-space:pre-wrap;overflow-wrap:anywhere}
-@media(max-width:1280px){.topbar{gap:12px;padding-inline:12px}#projectTotal{display:none}.project-bar{max-width:310px;padding-left:12px}.workbench{grid-template-columns:190px 270px minmax(0,1fr)}}
-@media(max-width:1000px){.topbar{flex-wrap:wrap}.project-bar{max-width:none;min-width:170px}.topbar>.toolbar{margin-left:auto}.workbench{grid-template-columns:170px 240px minmax(0,1fr)}.review-banner #reviewDate{display:none}}
+@media(max-width:1280px){.topbar{gap:12px;padding-inline:12px}#projectTotal{display:none}.project-bar{max-width:310px;padding-left:12px}.workbench{grid-template-columns:var(--project-sidebar-width,190px) 270px minmax(0,1fr)}}
+@media(max-width:1000px){.topbar{flex-wrap:wrap}.project-bar{max-width:none;min-width:170px}.topbar>.toolbar{margin-left:auto}.workbench{grid-template-columns:var(--project-sidebar-width,170px) 240px minmax(0,1fr)}.review-banner #reviewDate{display:none}}
 @media(max-width:800px){.topbar{display:grid;grid-template-columns:auto minmax(0,1fr);gap:8px 12px;padding:10px}.project-bar{min-width:0;border:0;padding:0}.project-bar label{display:none}.topbar>.toolbar{grid-column:1/-1;margin:0;gap:6px;flex-wrap:wrap}.topbar>.toolbar button{font-size:12px;min-height:30px}#projectSelect{max-width:none}.workbench{grid-template-columns:180px minmax(0,1fr)}.projects-column{display:none}body.project-drawer .projects-column{display:flex;position:absolute;z-index:40;inset:0 auto 0 0;width:min(310px,calc(100vw - 16px));box-shadow:8px 0 32px #0003}.project-drawer #projects{min-height:100px}.diff-toolbar{gap:7px;padding-inline:10px}.file-toolbar,.review-banner{padding-inline:12px}.section-heading{padding-inline:12px}}
 @media(max-width:520px){.brand h1{font-size:12px}.brand svg{width:18px}.version{font-size:9px}.brand{gap:6px}.topbar{gap:8px}.topbar>.toolbar button{font-size:11px;padding-inline:8px}.workbench{grid-template-columns:138px minmax(0,1fr)}.nav-tabs{padding:0 4px}.nav-tabs button{font-size:10px;padding-inline:2px}.scopes{margin:10px 7px}.scopes button{font-size:10px}.search-wrap{padding-inline:7px}.section-heading{padding-inline:8px}#repoName{font-size:12px}.branch{font-size:10px}.review-banner{gap:5px;flex-wrap:wrap}.review-banner button{padding-inline:6px;font-size:10px}.diff-toolbar .check{display:none}.diff-toolbar{gap:5px;padding-inline:7px}.diff-toolbar button{padding-inline:6px}#readonly{display:none}.welcome,.empty-state{padding:18px}.welcome h2,.empty-state h2{font-size:17px}.empty-state p{font-size:12px}.diff-table .number{width:28px}.number button{padding-right:3px}.code-cell{padding-inline:5px!important}.project-tab{max-width:180px}}
 
@@ -191,3 +191,13 @@ button.icon-button{position:relative;display:inline-flex;align-items:center;just
 button.icon-button>svg{display:block;width:18px;height:18px;flex:none;pointer-events:none}
 .summary-file-actions .icon-button,.hunk-actions .icon-button,.toggle .icon-button,#reviewFullscreen.icon-button{width:28px;height:28px;min-height:28px;padding:5px}
 #reviewFullscreen.icon-button>svg{width:16px;height:16px}
+
+/* Keep the project grid cell when collapsed so the other panes retain their columns. */
+.projects-collapsed .projects-column{visibility:hidden}
+.sidebar-resize{position:absolute;inset:0 auto 0 calc(var(--project-sidebar-width,220px) - 3px);width:6px;z-index:6;cursor:col-resize;touch-action:none}
+.sidebar-resize::after{content:'';position:absolute;inset:0 auto 0 2px;width:2px;background:transparent;transition:background .12s}
+.sidebar-resize:hover::after,.sidebar-resize:focus-visible::after,.resizing-sidebar .sidebar-resize::after{background:var(--accent)}
+.sidebar-resize:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.resizing-sidebar{user-select:none}.resizing-sidebar *{cursor:col-resize!important}
+.projects-collapsed .sidebar-resize,.review-fullscreen .sidebar-resize{display:none}
+@media(max-width:800px){.sidebar-resize{display:none}}
