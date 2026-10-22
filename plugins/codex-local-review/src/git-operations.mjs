@@ -40,15 +40,18 @@ async function safeDiscardPath(root,path){
 }
 export async function prepareOperation(root,args){
  const s=await repositoryStatus(root);if(s.ongoing||s.files.some(f=>f.unmerged))throw Error('请先完成当前合并、变基或冲突处理');
- const {operation}=args;let branch=args.branch,remote=args.remote,localBranch,tracking,detach=false,files=[],summary='';
+ const {operation}=args;let branch=args.branch,remote=args.remote,startPoint,localBranch,tracking,detach=false,files=[],summary='';
  if(operation!=='switch'&&(args.localBranch!==undefined||args.detach!==undefined))throw Error('localBranch / detach 仅支持远程分支切换');
+ if(operation!=='create_branch'&&args.startPoint!==undefined)throw Error('startPoint 仅支持创建分支的起点');
  if(operation==='switch'){
   const target=s.branches.find(b=>b.ref===branch);if(!target)throw Error('目标分支已变化，请刷新分支列表');
   if(args.detach!==undefined&&typeof args.detach!=='boolean')throw Error('detach 必须是布尔值');
   if(target.local){if(args.localBranch!==undefined||args.detach!==undefined)throw Error('localBranch / detach 仅支持远程分支切换');summary=`切换到 ${target.name}。保留可以安全携带的未提交改动；发生覆盖冲突时 Git 会停止。`;}
   else{const source=remoteBranch(s,branch);if(args.localBranch!==undefined&&args.detach!==undefined)throw Error('localBranch 与 detach 不能同时使用');detach=args.detach===true;if(detach)summary=`检出 ${target.name} 的提交 ${target.sha.slice(0,12)}，进入 detached HEAD。发生覆盖未提交改动的冲突时 Git 会停止。`;else{localBranch=await newBranchName(s,args.localBranch===undefined?source.branch:args.localBranch);await noTrackingConfig(s.root,localBranch);tracking=await trackingSource(s,branch);summary=`从 ${target.name} 创建并切换到本地跟踪分支 ${localBranch}，跟踪 ${tracking.remote}/${tracking.merge.slice(11)}。保留可以安全携带的未提交改动；发生覆盖冲突时 Git 会停止。`;}}
  }else if(operation==='create_branch'){
-  branch=await newBranchName(s,branch);summary=`从当前 HEAD 创建并切换到 ${branch}。`;
+  branch=await newBranchName(s,branch);await noTrackingConfig(s.root,branch);
+  if(args.startPoint!==undefined){const source=typeof args.startPoint==='string'&&/^refs\/(heads|remotes)\//.test(args.startPoint)?s.branches.find(b=>b.ref===args.startPoint):null;if(!source)throw Error('创建分支起点已变化或无效，请选择当前本地或远程分支');startPoint=source.ref;summary=`从 ${source.name}（${source.sha.slice(0,12)}）创建并切换到 ${branch}，不自动设置 upstream。`;}
+  else summary=`从当前 HEAD 创建并切换到 ${branch}，不自动设置 upstream。`;
  }else if(['fetch','pull','push'].includes(operation)){
   if(!s.remotes.includes(remote)||!remote||remote.startsWith('-'))throw Error('请选择当前仓库已配置的远程');
   if(operation!=='fetch'){
@@ -61,7 +64,7 @@ export async function prepareOperation(root,args){
   for(const f of files)await safeDiscardPath(s.root,f.path);
   summary=`丢弃 ${files.length} 个文件的未暂存改动。已暂存内容保留；其中 ${files.filter(f=>f.status==='??').length} 个未跟踪文件将被删除。此操作不能通过 Unstage 恢复。`;
  }else throw Error('不支持的 Git 操作');
- const command={operation,...(branch?{branch}:{}),...(remote?{remote}:{}),...(localBranch?{localBranch}:{}),...(detach?{detach:true}:{}),...(operation==='push'?{setUpstream:args.setUpstream===true}:{}),...(operation==='discard'?{paths:files.map(f=>f.path)}:{})};
+ const command={operation,...(branch?{branch}:{}),...(remote?{remote}:{}),...(startPoint?{startPoint}:{}),...(localBranch?{localBranch}:{}),...(detach?{detach:true}:{}),...(operation==='push'?{setUpstream:args.setUpstream===true}:{}),...(operation==='discard'?{paths:files.map(f=>f.path)}:{})};
  return {indexToken:hash([s.head,s.files]),token:hash([s.token,command,tracking]),command,summary,files:files.map(f=>({path:f.path,untracked:f.status==='??'})),branch:s.branch,tracking};
 }
 function commandError(e){const detail=String(e.stderr??e.message);if(/non-fast-forward|fast-forward|fetch first|divergent/i.test(detail))return Error('远程与本地已分叉或推送被拒绝；仅允许快进，请先核对并手动合并 / 变基。');if(/Authentication failed|Permission denied|could not read Username|Host key verification failed/i.test(detail))return Error('Git 认证失败，请先在本机终端配置 SSH / Git 凭据后重试。');if(/would be overwritten|local changes/i.test(detail))return Error('操作会覆盖未提交改动，Git 已停止。请先提交或处理这些文件。');if(/already checked out|already used by worktree/i.test(detail))return Error('目标分支正在其他 worktree 使用，请打开对应项目。');return Error('Git 操作未确认完成，请刷新核对仓库；检查本机 Git 状态、网络和认证后再试。');}
@@ -75,7 +78,7 @@ export async function executeOperation(root,args){return withGitWrite(root,async
    // Configure the newly created branch explicitly after its safe checkout succeeds.
    else{const source=plan.tracking;await git(root,['switch','--no-track','-c',c.localBranch,c.branch]);createdBranch=c.localBranch;await noTrackingConfig(root,c.localBranch);await git(root,['config','--local','--add',`branch.${c.localBranch}.remote`,source.remote]);await git(root,['config','--local','--add',`branch.${c.localBranch}.merge`,source.merge]);
     const [remotes,merges]=await Promise.all(['remote','merge'].map(key=>configValues(root,`branch.${c.localBranch}.${key}`))),upstream=(await git(root,['rev-parse','--symbolic-full-name',`${c.localBranch}@{upstream}`])).trim();if(remotes.length!==1||remotes[0]!==source.remote||merges.length!==1||merges[0]!==source.merge||upstream!==c.branch)throw Error('新分支的有效 upstream 与预览目标不一致');}
-  }else if(c.operation==='create_branch')await git(root,['switch','-c',c.branch]);
+  }else if(c.operation==='create_branch'){await git(root,['switch','--no-track','-c',c.branch,...(c.startPoint?[c.startPoint]:[])]);createdBranch=c.branch;await noTrackingConfig(root,c.branch);}
   else if(c.operation==='fetch')await git(root,['fetch','--',c.remote],{timeout:120000});
   else if(c.operation==='pull')await git(root,['-c','merge.autostash=false','-c','rebase.autoStash=false','-c','pull.rebase=false','pull','--ff-only','--no-rebase','--',c.remote,c.branch],{timeout:120000});
   else if(c.operation==='push')await git(root,['-c','push.followTags=false','push',...(c.setUpstream?['--set-upstream']:[]),'--',c.remote,`HEAD:refs/heads/${c.branch}`],{timeout:120000});

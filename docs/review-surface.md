@@ -20,7 +20,7 @@
 
 ## 分支与历史范围
 
-Git 命令栏中央是当前工作分支下拉入口，右侧保留 Fetch / Pull / Push。下拉为锚定的非模态 popover，支持搜索、方向键、Enter 与 Esc，底层审阅仍可操作；不弹出分支确认对话框。选择本地分支直接执行受令牌保护的切换，远端分支在同一面板中选择本地跟踪、改名跟踪或分离 HEAD。新建分支也沿用面板内表单。同名本地分支不会被覆盖，提供显式切换入口。操作失败保留选择和名称，关闭下拉不取消已经开始的 Git 操作；项目切换后旧结果不会回填新项目。Sublime Merge 的[Header 说明](https://www.sublimemerge.com/docs/themes)将当前分支信息放在中央；它的[分支可见性](https://www.sublimemerge.com/blog/sublime-merge-build-1070)与 checkout 是独立操作。本插件按同样区分处理历史范围：
+Git 命令栏中央是当前工作分支下拉入口，右侧保留 Fetch / Pull / Push。下拉为锚定的非模态 popover，支持搜索、方向键、Enter 与 Esc，底层审阅仍可操作；不弹出分支确认对话框。选择本地或远端分支后先进入该分支的操作菜单，不执行 Git 写入。本地可明确切换或从此分支新建；当前分支也能新建。远端提供本地跟踪、改名跟踪或分离 HEAD。新建表单显示选中起点，并用完整引用及状态令牌绑定来源，不再从列表底部默认为 HEAD。同名本地分支不会被覆盖，提供显式切换入口。操作失败保留选择和名称，关闭下拉不取消已经开始的 Git 操作；项目切换后旧结果不会回填新项目。Sublime Merge 的[Header 说明](https://www.sublimemerge.com/docs/themes)将当前分支信息放在中央；它的[分支可见性](https://www.sublimemerge.com/blog/sublime-merge-build-1070)与 checkout 是独立操作。本插件按同样区分处理历史范围：
 
 - 当前分支：显示当前 HEAD 可达的历史，包含共同祖先；不是与某个基线比较后只取独有提交。detached HEAD 沿用当前提交；未产生首次提交的分支显示空历史。
 - 全部分支：合并本地、远程分支以及当前 HEAD 的历史；排除仅由标签或 stash 引用的提交。
@@ -79,3 +79,5 @@ npm run test:local-review-ui
 0.5.7 加入 `scripts/check-local-review-branch-dropdown.mjs`；完整套件包含十四组。覆盖非模态和外部点击、本地与远端分支、同名不同 SHA、跟踪与分离检出、200 条之外搜索、键盘、脏工作区、失效令牌、等待期间关闭、失败恢复、跨项目隔离和深浅窄屏操作。
 
 0.5.8 加入 `scripts/check-local-review-commit-composer.mjs`；完整套件包含十五组，覆盖真实滚轮滚动、草稿和 DOM 保留、文件头避让、暂存／刷新、全屏、窄矮窗口及提交区内部控件可达性。
+
+0.5.9 将分支创建改为所选分支的上下文操作，参考 Sublime Merge 的[分支菜单与引用上下文](https://www.sublimemerge.com/docs/menus#available-menus)。本插件在中央下拉适配为「选择分支 → 选择操作 → 填写名称」，并不把 Sublime Merge 的普通单击定位描述为直接操作。分支界面回归增加选择不写入、当前分支、非 HEAD 起点、同名 tag、无隐式 upstream、返回路径及失效源；完整套件仍为十五组。
