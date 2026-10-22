@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | [任务看板](plugins/codex-task-panel/README.md) | 从 TAPD 选择导入任务，安排泳道进度，关联 Codex 会话 | 0.4.7 |
 | [API 调试台](plugins/codex-api-client/README.md) | 管理 HTTP 请求、集合与环境，整体备份迁移，执行脚本与断言 | 0.2.1 |
-| [本地代码审查](plugins/codex-local-review/README.md) | 浏览差异、添加行内批注，以及暂存、提交、拉取和推送 Git 改动 | 0.5.9 |
+| [本地代码审查](plugins/codex-local-review/README.md) | 浏览差异、添加行内批注，以及暂存、提交、拉取和推送 Git 改动 | 0.5.10 |
 | [DBX 数据库工作台](plugins/dbx/README.md) | 在 Codex 内使用 DBX 工作台，管理连接、查询数据库 | 0.6.39 |
 
 ## 快速开始
@@ -93,7 +93,7 @@ node scripts/install.mjs --plugin codex-task-panel --plugin codex-local-review
 
 任务看板保存配置不会自动导入任务，也不会向 TAPD 回写状态。API 调试台的请求从本机发出，支持 localhost 和内网。
 
-代码审查可独立使用；如需在提交时关联 TAPD 任务，还需安装并配置任务看板。安装任务看板时会自动登记其本机联动接口。详见[任务提交联动](docs/task-commit-context.md)。
+代码审查可独立使用；如需在提交时关联 TAPD 任务，还需安装并配置任务看板。提交区直接显示完整源码关键字，可一键应用到说明；提交时也会自动携带，已有相同完整独立行时不重复添加。安装任务看板时会自动登记其本机联动接口。详见[任务提交联动](docs/task-commit-context.md)。
 
 ## 更新插件
 
