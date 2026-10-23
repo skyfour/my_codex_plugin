@@ -2,7 +2,31 @@
 
 本地 Postman 式 Codex 插件，管理 HTTP/HTTPS 请求、集合和环境，执行 Postman 前置/响应脚本与断言，查看响应、历史和运行报告。请求从本机发出，支持 localhost 和内网，无需额外 OpenAI API Key。
 
-安装与更新见[仓库说明](../../README.md)。需要 macOS、Node.js >=22.13 和支持 MCP Apps 的 Codex 客户端。在 Codex 中输入「打开 API 调试台」。
+## 前置条件与安装限制
+
+- macOS、Node.js ≥22.13（建议 Node 24 LTS，含 npm）、Git，以及已登录的 Codex 桌面版与 CLI。
+- CLI 需支持 `codex plugin`，桌面版需支持 MCP Apps；`node` 和 `codex` 需能被桌面应用找到。
+- 敏感变量及 Cookie 值依赖 macOS Keychain，当前完整安装不支持 Windows／Linux。
+- 请求从本机发出，访问内网／本机服务需确保本机网络与服务可用。
+
+## 安装与更新
+
+还未克隆仓库时，先按[仓库快速开始](../../README.md#快速开始)获取源码；以下命令均在仓库根目录执行。
+
+```sh
+npm run install:api-client
+```
+
+只安装 API 调试台的锁定依赖、构建界面、检查 MCP 并注册该插件。更新时执行：
+
+```sh
+git pull --ff-only
+npm run install:api-client
+```
+
+重新打开 Codex，确认插件已启用，再点击左侧「API 调试台」或输入「打开 API 调试台」。更新保留本机集合与环境；只执行 `git pull` 不会更新已安装实例。
+
+## 支持范围
 
 支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key、cURL/Postman 导入导出、JSON/CSV 数据迭代和取消运行。当前不支持 OAuth 授权窗口、其他协议、Vault 或云脚本包。
 
@@ -29,12 +53,28 @@ URL 中能在当前作用域解析的变量显示绿色，未设置的变量显�
 
 JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；响应正文独立滚动，格式化、搜索、复制和保存工具栏固定在响应区顶部。
 
+## 本地数据与运行限制
+
 默认数据目录为 `~/Library/Application Support/Codex API Client`，可通过 `CODEX_API_CLIENT_DATA_DIR` 修改。敏感变量和 Cookie 值使用 macOS Keychain；新电脑需要重新配置敏感值。将密码、Token 标记为敏感并通过 `{{token}}` 引用，不要硬编码到脚本或 URL。普通响应可存入本地历史。
 
 每次保存检查 revision，遇到并发冲突保留未保存编辑。默认超时为请求 30 秒、脚本 5 秒、运行 120 秒；每个服务最多同时 4 次运行，不作为压测工具。
 
-示例：运行 `node scripts/demo-server.mjs`，导入 `examples/` 中的集合与环境，选择本地演示环境后运行集合。执行会实际发送请求，导入本身不会执行。
+## 本地示例
 
-开发：`npm ci`、`npm run build`、`npm test`、`npm run check`。`npm run dev` 在 `127.0.0.1:47890` 提供独立预览。浏览器验证使用 `npm exec playwright -- test --config playwright.tree.config.ts`，需要 Chrome。
+在仓库根目录运行 `node plugins/codex-api-client/scripts/demo-server.mjs`，导入 `plugins/codex-api-client/examples/` 中的集合与环境，选择本地演示环境后运行集合。执行会实际发送请求，导入本身不会执行。
+
+## 常见问题
+
+**新电脑如何继续使用原有请求？** 在旧电脑点击「导出全部」，在新电脑安装插件后导入备份。敏感值、Cookie 和本机文件附件不随备份迁移，需要重新配置；详细范围见[整体导入与导出](#整体导入与导出)。
+
+**界面更新了，安装后仍是旧版？** 先确认安装脚本完成构建，再重新打开 Codex 并新建聊天。开发预览也需先运行 `npm run build`。
+
+**变量显示红色或鉴权失败？** 检查是否选中正确环境、变量是否启用，以及 Keychain 中的敏感值是否已保存。悬停变量可查看解析来源；不要把 Token 写入 URL 或脚本以绕过配置。
+
+**请求超时或访问不了 localhost？** 请求从运行插件的本机发送；确认目标服务、端口、代理与本机网络可用。本插件不用于压测，默认时限与并发限制见上文。
+
+## 开发与验证
+
+在插件目录执行 `npm ci`、`npm run build`、`npm test`、`npm run check`。`npm run dev` 在 `127.0.0.1:47890` 提供独立预览。浏览器验证使用 `npm exec playwright -- test --config playwright.tree.config.ts`，需要 Chrome。
 
 完整界面与易用性回归使用 `npm exec playwright -- test --config playwright.usability.config.ts`；先执行 `npm run build`，确保预览加载最新界面。

@@ -2,15 +2,37 @@
 
 从 TAPD 选择导入任务，在自定义泳道间拖拽安排进度，查看来源全文，关联本机 Codex 会话。工作流支持配置允许的状态流转；不向 TAPD 回写。
 
-安装与更新见[仓库说明](../../README.md)。在 Codex 中输入「打开任务看板」。需要 Node.js >=22.13 和支持 `plugin`、`app-server --stdio` 的 Codex CLI。
+## 前置条件与安装限制
 
-在「设置 → 数据源」配置 TAPD 工作空间、账户完整姓名，再在「本地凭据」输入 Access Token 并保存。输入隐藏，保存后清空，不返回令牌。终端 `npm run configure` 仍可作为备用方式；即使配置了环境变量 `TAPD_ACCESS_TOKEN`，输入框仍可编辑；重新保存的本地令牌立即优先生效，旧配置在重新保存前保持原优先级。看板中「导入任务」需要用户查询、勾选、确认，不自动导入。
+- macOS、Node.js ≥22.13（建议 Node 24 LTS，含 npm）、Git。
+- 已登录 Codex 桌面版与 CLI；CLI 需支持 `codex plugin`。关联／新建会话还需支持 `codex app-server --stdio`。
+- TAPD 导入需要可访问的 TAPD 工作空间、账户完整姓名和有效 Access Token。凭据只在本机配置。
+- 当前仓库的完整安装流程仅支持 macOS；不会自动导入任务，也不会向 TAPD 回写状态。
+
+## 安装与更新
+
+还未克隆仓库时，先按[仓库快速开始](../../README.md#快速开始)获取源码；以下命令均在仓库根目录执行。
+
+```sh
+npm run install:task-panel
+```
+
+只准备并注册任务看板，不安装其他插件。更新时执行：
+
+```sh
+git pull --ff-only
+npm run install:task-panel
+```
+
+重新打开 Codex，确认插件已启用，点击左侧「任务看板」；也可在聊天输入「打开任务看板」。更新保留本机任务、泳道与会话关联。只执行 `git pull` 不会更新已安装实例。
+
+## 第一次使用
+
+在「设置 → 数据源」配置 TAPD 工作空间、账户完整姓名，再在「本地凭据」输入 Access Token 并保存。输入隐藏，保存后清空，不返回令牌。仓库根目录执行 `npm --prefix plugins/codex-task-panel run configure` 仍可作为备用方式；即使配置了环境变量 `TAPD_ACCESS_TOKEN`，输入框仍可编辑；重新保存的本地令牌立即优先生效，旧配置在重新保存前保持原优先级。看板中「导入任务」需要用户查询、勾选、确认，不自动导入。
 
 点击任务可绑定已有会话或新建空会话。创建后只绑定并请求打开，不自动发送任务或启动执行；解除关联不删除会话。宿主版本不支持会话跳转时，可按界面显示的 `codex resume <ID>` 恢复。
 
 数据保存在 `${CODEX_HOME:-~/.codex}/task-panel/board.sqlite`，凭据在同目录 `credentials.json`（0600）。`TASK_PANEL_HOME` 可指定独立目录；配置终端与 Codex 应使用相同环境变量。升级保留本地泳道和关联，数据库升级后不支持直接降级。
-
-开发：`npm ci`、`npm test`、`npm run dev -- --demo`。正式使用由 Codex 按需启动 stdio MCP。`npm run build` 是原独立市场打包器，统一仓库安装无需运行。
 
 顶部「＋ 导入任务」直接打开选择入口，不等待宿主刷新，也不发送 TAPD 请求。进入后点击「查询候选任务」才开始查询；缺少配置时使用「设置数据源」。
 
@@ -18,6 +40,23 @@
 
 ## 源码提交联动
 
-已导入任务的详情增加「源码提交关联」：点击「从 TAPD 获取」使用本机凭据只读查询 `/svn_commits/get_scm_copy_keywords`（workspace_id、完整 object_id、type=task），将接口原文保存到本地 `task_scm` 表。不会改写任务来源快照、TAPD 状态或导入哈希。API 失败会保留已有关键字；手动保存用于原文修正或离线使用。代码审查的 Summary 提交编辑区可以选择同机看板任务，自动带入此关键字。
+已导入任务的详情增加「源码提交关联」：点击「从 TAPD 获取」使用本机凭据只读查询 `/svn_commits/get_scm_copy_keywords`（workspace_id、完整 object_id、type=task），将接口原文保存到本地 `task_scm` 表。不会改写任务来源快照、TAPD 状态或导入哈希。API 失败会保留已有关键字；手动保存用于原文修正或离线使用。代码审查的 Summary 提交编辑区可以选择同机看板任务，查看完整关键字并一键覆盖提交说明。
 
 任务看板通过公开的提交上下文 v1 接口向代码审查提供任务列表和完整关键字。任务详情与跨插件调用共用 `CommitContextService`；TAPD 客户端、凭据加载和本地缓存都留在看板内。已保存的关键字可离线使用，主动点击「从 TAPD 获取」才强制刷新。安装时自动登记本机接口路径，启动看板时也会登记；没有新增常驻服务。详见[领域边界与通信协议](../../docs/task-commit-context.md)。
+
+
+## 常见问题
+
+**查不到 TAPD 任务？** 检查数据源中的工作空间 ID、账户完整姓名和本地凭据；点击「查询候选任务」才发起请求。只保存设置不会自动导入。已导入任务不会因重复查询创建副本。
+
+**无法创建或跳转 Codex 会话？** 先确认 CLI 已登录且支持 `app-server --stdio`。宿主不支持跳转时可按界面中的 `codex resume <ID>` 恢复；创建会话只绑定并请求打开，不自动执行任务。
+
+**换电脑后任务不见了？** 各电脑的本地泳道和会话关联独立。先在新电脑安装并配置 TAPD，再重新导入所需任务；迁移本地数据库前先关闭对应服务。
+
+**安装成功却没有左侧入口？** 确认 `node` 和 `codex` 位于桌面应用能继承的 PATH，插件已启用，再重新打开 Codex 并新建聊天。更多排查见[仓库常见问题](../../README.md#常见问题)。
+
+## 开发与验证
+
+在插件目录执行 `npm ci`、`npm test`、`npm run dev -- --demo`；正式使用由 Codex 按需启动 stdio MCP。`npm run build` 是旧的独立市场打包器，本仓库安装无需运行。
+
+在仓库根目录执行 `npm run test:task-panel-ui` 验证浏览器交互，需要 Chrome。开发预览使用隔离的 `TASK_PANEL_HOME`，不要写入正式任务目录。

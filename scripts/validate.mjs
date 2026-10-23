@@ -21,36 +21,34 @@ for (const plugin of marketplace.plugins) {
   assert.ok(plugin.category);
   const manifest = json(resolve(path, '.codex-plugin/plugin.json'));
   assert.equal(manifest.name, plugin.name);
-  if (plugin.name === 'dbx') {
-    const release = json(resolve(path, 'release.json'));
-    const mcp = json(resolve(path, manifest.mcpServers));
-    assert.equal(release.version, manifest.version);
-    assert.equal(release.repository, 'skyfour/my_codex_plugin');
-    assert.equal(release.tag, `dbx-v${release.version}`);
-    assert.ok(Object.keys(release.artifacts).length > 0);
-    for (const artifact of Object.values(release.artifacts)) {
-      assert.match(artifact.file, /^dbx-codex-[\w.-]+\.tar\.gz$/);
-      assert.match(artifact.sha256, /^[a-f0-9]{64}$/);
-    }
-    assert.equal(mcp.mcpServers.dbx.command, './bin/dbx-codex');
-    assert.equal(mcp.mcpServers.dbx.cwd, '.');
-    assert.ok(existsSync(resolve(path, manifest.interface.logo)));
-    assert.ok(existsSync(resolve(path, 'LICENSE')));
-    console.log(`dbx ${manifest.version}: manifest、MCP 入口、发布包校验信息通过`);
-    continue;
-  }
   const pkg = json(resolve(path, 'package.json'));
   const lock = json(resolve(path, 'package-lock.json'));
   assert.equal(pkg.name, plugin.name);
   assert.equal(manifest.version, pkg.version);
   assert.equal(lock.packages[''].version, pkg.version);
-  assert.ok(existsSync(resolve(path, manifest.skills)));
+  if (plugin.name !== 'dbx') assert.ok(existsSync(resolve(path, manifest.skills)));
   const mcp = json(resolve(path, manifest.mcpServers));
   for (const server of Object.values(mcp.mcpServers)) {
     assert.equal(server.command, 'node');
     assert.equal(server.cwd, '.');
-    assert.ok(server.args.includes('--experimental-sqlite'));
+    if (plugin.name === 'dbx') {
+      assert.deepEqual(server.args, ['servers/server.mjs']);
+      assert.deepEqual(server.env_vars, ['DBX_CODEX_DOCKER_HOME', 'DBX_CODEX_DOCKER_PORT']);
+    } else {
+      assert.ok(server.args.includes('--experimental-sqlite'));
+    }
     assert.ok(existsSync(resolve(path, server.args.at(-1))));
+  }
+  if (plugin.name === 'dbx') {
+    assert.deepEqual(Object.keys(mcp.mcpServers), ['dbx']);
+    assert.deepEqual(pkg.dependencies, { '@modelcontextprotocol/sdk': '1.30.0', acorn: '8.15.0' });
+    assert.deepEqual(lock.packages[''].dependencies, pkg.dependencies);
+    assert.equal(pkg.scripts.check, 'node tests/smoke.mjs');
+    assert.equal(pkg.scripts.preinstall, undefined);
+    assert.equal(pkg.scripts.postinstall, undefined);
+    assert.ok(!existsSync(resolve(path, 'release.json')), '官方运行版本由 Docker runtime 管理，不固定自建发布包');
+    assert.ok(existsSync(resolve(path, manifest.interface.logo)));
+    assert.ok(existsSync(resolve(path, 'LICENSE')));
   }
   console.log(`${plugin.name} ${manifest.version}: manifest、MCP 入口、锁文件通过`);
 }

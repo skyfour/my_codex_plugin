@@ -2,7 +2,6 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { prepareDbx } from './install-dbx.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const usage = `用法：
@@ -62,10 +61,6 @@ export function installPlugins(args = process.argv.slice(2)) {
   run(process.execPath, ['scripts/validate.mjs']);
   if (!prepare) run('codex', ['plugin', '--help']);
   for (const plugin of plugins) {
-    if (plugin.name === 'dbx') {
-      prepareDbx(root);
-      continue;
-    }
     const cwd = resolve(root, plugin.source.path);
     console.log(`准备 ${plugin.name}`);
     run('npm', ['ci', '--no-audit', '--no-fund'], cwd);
