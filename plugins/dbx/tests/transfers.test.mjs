@@ -4,6 +4,7 @@ import {mkdtemp,readFile,readdir,rm,stat} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,dirname,basename} from 'node:path';
 import {Transfers} from '../src/transfers.mjs';
+import {execFileSync} from 'node:child_process';
 
 async function fixture(t){
   const home=await mkdtemp(join(tmpdir(),'dbx-transfer-test-')),transfers=new Transfers(home);
@@ -11,6 +12,27 @@ async function fixture(t){
   return {home,transfers,directory:join(home,'exports')};
 }
 const encoded=text=>Buffer.from(text).toString('base64');
+
+// A real process file-size limit forces a short write followed by EFBIG. Never report a truncated export as saved.
+test('file-size limit rejects a short write and removes the incomplete export', {skip:process.platform==='win32'},()=>{
+  const script=`
+    import {mkdtemp,readdir,rm} from 'node:fs/promises';
+    import {tmpdir} from 'node:os';
+    import {join} from 'node:path';
+    import {Transfers} from ${JSON.stringify(new URL('../src/transfers.mjs',import.meta.url).href)};
+    process.on('SIGXFSZ',()=>{});
+    const home=await mkdtemp(join(tmpdir(),'dbx-write-limit-')),transfers=new Transfers(home);
+    try {
+      const {id}=await transfers.action('download-open',{name:'export.bin'});
+      let rejected=false,closed=false;
+      try {await transfers.action('download-write',{id,data:Buffer.alloc(4096,65).toString('base64')});} catch {rejected=true;}
+      try {await transfers.action('download-close',{id});closed=true;} catch {}
+      console.log(JSON.stringify({rejected,closed,files:await readdir(join(home,'exports'))}));
+    } finally {await transfers.close();await rm(home,{recursive:true,force:true});}
+  `;
+  const result=JSON.parse(execFileSync('/bin/sh',['-c','ulimit -f 2\nexec "$@"','dbx-write-limit',process.execPath,'--input-type=module','-e',script],{encoding:'utf8',timeout:10000}));
+  assert.deepEqual(result,{rejected:true,closed:false,files:[]});
+});
 
 // Untrusted server filenames must not escape the controlled private exports directory.
 for(const name of ['../../outside.csv','/tmp/outside.csv','..\\..\\outside.csv','a\u0000b\nc.csv'])test(`download filename stays inside exports: ${JSON.stringify(name)}`,async t=>{

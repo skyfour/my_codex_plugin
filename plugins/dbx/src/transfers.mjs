@@ -27,7 +27,15 @@ export class Transfers {
       if(typeof payload.data!=='string'||payload.data.length>90000||!/^[A-Za-z0-9+/]*={0,2}$/.test(payload.data))throw new Error('无效的导出分块');
       const bytes=Buffer.from(payload.data,'base64');item.size+=bytes.length;
       if(item.size>256*1024*1024){await this.action('download-cancel',payload);throw new Error('嵌入导出上限为 256 MiB');}
-      await item.file.write(bytes);return {written:bytes.length};
+      try {
+        let offset=0;
+        while(offset<bytes.length){
+          const {bytesWritten}=await item.file.write(bytes,offset,bytes.length-offset);
+          if(bytesWritten===0)throw new Error('导出文件写入未完成');
+          offset+=bytesWritten;
+        }
+        return {written:offset};
+      }catch(error){await this.action('download-cancel',payload).catch(()=>{});throw error;}
     }
     if(action==='download-close'){await item.file.close();this.#active.delete(payload.id);return {path:item.path};}
     if(action==='download-cancel'){await item.file.close();this.#active.delete(payload.id);await unlink(item.path).catch(()=>{});return {};}

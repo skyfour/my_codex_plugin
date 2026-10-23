@@ -10,9 +10,10 @@ const hop = new Set(['connection','keep-alive','proxy-authenticate','proxy-autho
 export async function createWebProxy({upstream, transformScript=rewriteScript, getVersion=()=>null}={}) {
   const target=new URL(upstream);
   if(target.protocol!=='http:'||target.hostname!=='127.0.0.1'||target.username||target.password||target.pathname!=='/') throw new Error('DBX upstream must be a loopback HTTP origin');
-  const prefix=`/${randomBytes(24).toString('hex')}/`, cookies=new Map(), sockets=new Set();
+  const prefix=`/${randomBytes(24).toString('hex')}/`, cookies=new Map(), sockets=new Set(), requests=new Set();
   const compat=await readFile(new URL('../ui/compat.js',import.meta.url),'utf8');
   let origin;
+  const track=request=>{requests.add(request);request.once('close',()=>requests.delete(request));return request;};
   const rewrite=value=>value.replace(/(["'`])\/(assets|db-icons|fonts|images|icons)\//g,`$1${prefix}$2/`);
   const bootstrap=`(()=>{const prefix=${JSON.stringify(prefix)};const map=v=>{const u=new URL(v,location.href);if(u.origin===location.origin&&!u.pathname.startsWith(prefix))u.pathname=prefix.slice(0,-1)+u.pathname;return u.href;};const f=window.fetch.bind(window);window.fetch=(v,o)=>f(v instanceof Request?new Request(map(v.url),v):map(v),o);const x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u,...a){return x.call(this,m,map(u),...a)};for(const key of ['EventSource','WebSocket']){const C=window[key];if(C)window[key]=class extends C{constructor(u,...args){const v=new URL(u,location.href);const local=v.hostname===location.hostname&&v.port===location.port;if(local&&!v.pathname.startsWith(prefix))v.pathname=prefix.slice(0,-1)+v.pathname;super(v.href,...args)}};}window.__DBX_PROXY_PREFIX__=prefix;})();`;
   const headers=req=>{
@@ -40,7 +41,8 @@ export async function createWebProxy({upstream, transformScript=rewriteScript, g
     const path=pathFor(req);if(!path){res.writeHead(404).end();return;}
     res.setHeader('Cache-Control','no-store');res.setHeader('Referrer-Policy','no-referrer');
     if(path==='/_codex/compat.js'){res.setHeader('Content-Type','text/javascript; charset=utf-8');res.end(`${bootstrap}\n${compat}`);return;}
-    const request=http.request(new URL(path,target),{method:req.method,headers:headers(req)},response=>{
+    const request=track(http.request(new URL(path,target),{method:req.method,headers:headers(req)},response=>{
+      response.on('error',()=>res.destroy());
       absorbCookies(response);
       for(const [key,value] of Object.entries(response.headers)) if(value!==undefined&&!['set-cookie','content-length','content-security-policy','x-frame-options','location','transfer-encoding','connection','cache-control'].includes(key))res.setHeader(key,value);
       if(response.headers.location){const location=new URL(response.headers.location,target);if(location.origin===target.origin)res.setHeader('Location',prefix.slice(0,-1)+location.pathname+location.search);else {response.resume();res.writeHead(502).end('Unexpected upstream redirect');return;}}
@@ -59,26 +61,30 @@ export async function createWebProxy({upstream, transformScript=rewriteScript, g
           res.removeHeader('etag');res.removeHeader('content-encoding');res.end(body);
         }catch{res.statusCode=503;res.end('DBX browser compatibility check failed. This official version needs a plugin compatibility update.');}
       });
-      response.on('error',()=>res.destroy());
-    });
+    }));
     request.on('error',()=>{if(!res.headersSent)res.writeHead(503,{'Content-Type':'text/plain; charset=utf-8'});res.end('DBX is starting or Docker is unavailable. Use the DBX toolbar to retry.');});
-    req.on('aborted',()=>request.destroy());req.pipe(request);
+    req.on('aborted',()=>request.destroy());res.once('close',()=>request.destroy());req.pipe(request);
   });
   server.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>sockets.delete(socket));});
   server.on('upgrade',(req,socket,head)=>{
     const path=pathFor(req);if(!path){socket.destroy();return;}
-    const request=http.request(new URL(path,target),{headers:{...headers(req),connection:'Upgrade',upgrade:req.headers.upgrade??'websocket'}});
+    const request=track(http.request(new URL(path,target),{headers:{...headers(req),connection:'Upgrade',upgrade:req.headers.upgrade??'websocket'}}));
+    let remoteSocket;
+    const cancel=()=>{request.destroy();remoteSocket?.destroy();};
+    socket.once('end',cancel);socket.once('close',cancel);socket.once('error',cancel);
     request.on('upgrade',(response,remote,remoteHead)=>{
+      if(socket.destroyed){remote.destroy();return;}
+      remoteSocket=remote;
       absorbCookies(response);
       sockets.add(remote);remote.once('close',()=>sockets.delete(remote));
       socket.write(`HTTP/1.1 ${response.statusCode} Switching Protocols\r\n${Object.entries(response.headers).filter(([key])=>key!=='set-cookie').map(([k,v])=>`${k}: ${v}`).join('\r\n')}\r\n\r\n`);
       if(remoteHead.length)socket.write(remoteHead);if(head.length)remote.write(head);socket.pipe(remote).pipe(socket);
-      socket.on('error',()=>remote.destroy());remote.on('error',()=>socket.destroy());
+      remote.once('close',()=>socket.destroy());remote.on('error',()=>socket.destroy());
     });
     request.on('response',response=>{socket.end(`HTTP/1.1 ${response.statusCode} Rejected\r\nConnection: close\r\n\r\n`);response.resume();});
     request.on('error',()=>socket.destroy());request.end();
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   origin=`http://127.0.0.1:${server.address().port}`;
-  return {origin,url:origin+prefix,close:async()=>{cookies.clear();for(const socket of sockets)socket.destroy();await new Promise(resolve=>server.close(resolve));}};
+  return {origin,url:origin+prefix,close:async()=>{cookies.clear();for(const request of requests)request.destroy();for(const socket of sockets)socket.destroy();await new Promise(resolve=>server.close(resolve));}};
 }

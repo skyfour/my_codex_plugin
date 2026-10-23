@@ -123,6 +123,34 @@ test('SSE events stream before upstream closes and preserve event framing',{time
   await completed;assert.equal(chunks.join(''),'event: result\ndata: one\n\ndata: two\n\n');
 });
 
+for(const closing of ['downstream','proxy'])test(`${closing} close cancels the upstream SSE connection`,{timeout:5000},async t=>{
+  const disconnected=deferred(),first=deferred();
+  const remote=await upstream(t,(_req,res)=>{
+    res.once('close',()=>disconnected.resolve(true));
+    res.writeHead(200,{'Content-Type':'text/event-stream'});res.write('data: pending\n\n');
+  });
+  const local=await proxy(t,remote.origin);
+  const req=http.get(local.url+'events',res=>{
+    res.on('error',()=>{});res.once('data',()=>first.resolve(res));res.resume();
+  });req.on('error',()=>{});t.after(()=>req.destroy());
+  const response=await first.promise;
+  if(closing==='downstream')response.destroy();else await local.close();
+  assert.equal(await Promise.race([disconnected.promise,new Promise(resolve=>setTimeout(()=>resolve(false),1000).unref())]),true,'upstream SSE must close with its consumer');
+});
+
+for(const closing of ['downstream','proxy'])test(`${closing} close cancels a pending upstream WebSocket upgrade`,{timeout:5000},async t=>{
+  const connected=deferred(),disconnected=deferred();
+  const remote=await upstream(t,(_req,res)=>res.end(),(_req,socket)=>{
+    socket.once('end',()=>socket.end());socket.once('close',()=>disconnected.resolve(true));connected.resolve();
+  });
+  const local=await proxy(t,remote.origin);
+  const req=http.request(local.url+'terminal',{headers:{Connection:'Upgrade',Upgrade:'websocket'}});
+  req.on('error',()=>{});req.end();t.after(()=>req.destroy());
+  await connected.promise;
+  if(closing==='downstream')req.destroy();else await local.close();
+  assert.equal(await Promise.race([disconnected.promise,new Promise(resolve=>setTimeout(()=>resolve(false),1000).unref())]),true,'an abandoned upgrade must close its upstream connection');
+});
+
 test('official webPath wrapping an already scoped database icon stays in the same namespace',async t=>{
   const seen=[];const remote=await upstream(t,(req,res)=>{seen.push(req.url);res.setHeader('Content-Type','image/svg+xml');res.end('<svg/>');});
   const local=await proxy(t,remote.origin),prefix=new URL(local.url).pathname;
