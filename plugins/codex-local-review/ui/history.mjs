@@ -23,7 +23,9 @@ async function showCommitHistory({preferHead=false,target}={}){
 async function applyHistoryRange(mode,refs=project?.state?.historyRefs??[]){
  saveDraft();const selected=project;
  const result=await call('project_update',{id:selected.id,state:{historyMode:mode,historyRefs:refs}});selected.state={...selected.state,historyMode:mode,historyRefs:refs};acceptWorkspace(result);
- repository=(await call('project_open',{id:selected.id})).repository;
+ const previous=repository.commits.find(c=>c.sha===scope.target);repository=(await call('project_open',{id:selected.id})).repository;
+ // A full SHA identifies immutable content; a display-range refresh only replaces list metadata.
+ const retained=repository.commits.find(c=>c.sha===previous?.sha);if(retained&&previous&&('message'in previous||'messageError'in previous)){retained.message=previous.message;retained.messageError=previous.messageError;}
  if(tab==='commits'&&scope.mode==='commit'&&repository.commits.some(c=>c.sha===scope.target)){renderNavigation();await refreshGitStatus();await remember();}
  else await showCommitHistory();
  renderProjects();
