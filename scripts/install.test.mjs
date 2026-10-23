@@ -33,20 +33,10 @@ function fixture(t) {
     write(join(target, '.mcp.json'), JSON.stringify(mcp));
     write(join(target, manifest.interface.logo), '<svg/>');
     if (existsSync(join(source, 'install.mjs'))) cpSync(join(source, 'install.mjs'), join(target, 'install.mjs'));
-    if (name === 'dbx') {
-      const release = json(join(source, 'release.json'));
-      const sha256 = '0'.repeat(64);
-      release.artifacts = { [`${process.platform}-${process.arch}`]: { file: 'dbx-codex-fixture.tar.gz', sha256 } };
-      write(join(target, 'release.json'), JSON.stringify(release));
-      write(join(target, '.installed-release.json'), JSON.stringify({ version: release.version, sha256 }));
-      for (const relative of ['bin/dbx-codex', 'bin/dbx-web', 'assets/workbench.html', 'LICENSE']) {
-        write(join(target, relative), 'fixture');
-      }
-    } else {
-      for (const relative of ['package.json', 'package-lock.json']) cpSync(join(source, relative), join(target, relative));
-      mkdirSync(join(target, manifest.skills), { recursive: true });
-      for (const server of Object.values(mcp.mcpServers)) write(join(target, server.args.at(-1)), '// fixture');
-    }
+    for (const relative of ['package.json', 'package-lock.json']) cpSync(join(source, relative), join(target, relative));
+    if (manifest.skills) mkdirSync(join(target, manifest.skills), { recursive: true });
+    for (const server of Object.values(mcp.mcpServers)) write(join(target, server.args.at(-1)), '// fixture');
+    if (name === 'dbx') write(join(target, 'LICENSE'), 'fixture');
   }
   const legacyApiEntry = 'plugins/codex-api-client/scripts/install-local.mjs';
   write(join(root, legacyApiEntry), readFileSync(join(repositoryRoot, legacyApiEntry)));
@@ -59,14 +49,14 @@ import { dirname, join } from 'node:path';
 const command = process.argv[1].split('/').at(-1);
 const args = process.argv.slice(2);
 appendFileSync(process.env.PLUGIN_INSTALL_TEST_LOG, JSON.stringify({ command, args, cwd: process.cwd() }) + String.fromCharCode(10));
-if (command === 'curl' || command === 'tar') process.exit(90);
+if (['curl', 'tar', 'docker'].includes(command)) process.exit(90);
 if (command === 'codex' && args[0] === 'plugin' && args[1] === 'add' && args[2].startsWith('codex-task-panel@')) {
   const entry = join(process.env.CODEX_HOME, 'plugins/cache/my-codex-plugins/codex-task-panel', process.env.PLUGIN_INSTALL_TEST_TASK_VERSION, 'servers/commit-context.mjs');
   mkdirSync(dirname(entry), { recursive: true });
   writeFileSync(entry, "import { appendFileSync } from 'node:fs'; appendFileSync(process.env.PLUGIN_INSTALL_TEST_LOG, JSON.stringify({command:'provider',args:process.argv.slice(2),cwd:process.cwd()}) + String.fromCharCode(10));");
 }
 `;
-  for (const command of ['npm', 'codex', 'curl', 'tar']) {
+  for (const command of ['npm', 'codex', 'curl', 'tar', 'docker']) {
     write(join(bin, command), `#!${process.execPath}\n${recorder}`, { mode: 0o755 });
   }
   mkdirSync(join(root, 'unrelated-working-directory'));
@@ -94,13 +84,13 @@ if (command === 'codex' && args[0] === 'plugin' && args[1] === 'add' && args[2].
 
 function assertSelection(result, names, { prepare = false } = {}) {
   assert.equal(result.status, 0, result.output);
-  assert.deepEqual(result.calls.filter(call => call.command === 'npm' && call.args[0] === 'ci').map(call => basename(call.cwd)), names.filter(name => name !== 'dbx'));
+  assert.deepEqual(result.calls.filter(call => call.command === 'npm' && call.args[0] === 'ci').map(call => basename(call.cwd)), names);
   const additions = result.calls.filter(call => call.command === 'codex' && call.args[0] === 'plugin' && call.args[1] === 'add');
   assert.deepEqual(additions.map(call => call.args[2]), prepare ? [] : names.map(name => `${name}@my-codex-plugins`));
   const registrations = result.calls.filter(call => call.command === 'provider');
   assert.equal(registrations.length, !prepare && names.includes('codex-task-panel') ? 1 : 0);
   if (registrations.length) assert.deepEqual(registrations[0].args, ['--register']);
-  assert.equal(result.calls.some(call => call.command === 'curl' || call.command === 'tar'), false, 'fixture 不应下载或解包 DBX');
+  assert.equal(result.calls.some(call => ['curl', 'tar', 'docker'].includes(call.command)), false, '安装插件不得下载原生程序或调用 Docker');
   if (prepare) assert.equal(result.calls.some(call => call.command === 'codex'), false, '准备模式不得调用 Codex');
 }
 
@@ -160,4 +150,13 @@ for (const name of pluginNames) {
 test('API 旧安装入口只安装 API Client', { skip: process.platform !== 'darwin' }, t => {
   const result = fixture(t).run('plugins/codex-api-client/scripts/install-local.mjs');
   assertSelection(result, ['codex-api-client']);
+});
+
+
+test('DBX 准备只安装依赖和检查 MCP，不启动或更新 Docker', t => {
+  const result = fixture(t).run('plugins/dbx/install.mjs', ['--prepare']);
+  assertSelection(result, ['dbx'], { prepare: true });
+  assert.deepEqual(result.calls.filter(call => call.command === 'npm').map(call => call.args), [
+    ['ci', '--no-audit', '--no-fund'], ['run', 'check'],
+  ]);
 });

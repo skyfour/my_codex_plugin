@@ -1,18 +1,18 @@
 {
   "name": "dbx",
   "version": "0.6.39",
-  "description": "A complete local DBX database workbench and MCP server inside Codex.",
+  "description": "Official DBX Docker Web workbench inside Codex with local lifecycle controls.",
   "author": {
-    "name": "DBX contributors",
-    "url": "https://github.com/t8y2/dbx"
+    "name": "skyfour",
+    "url": "https://github.com/skyfour/my_codex_plugin"
   },
   "license": "Apache-2.0",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "DBX",
-    "shortDescription": "Local database workbench and MCP",
-    "longDescription": "Open the full DBX Web workbench in Codex. Connections, queries, results and MCP share one private local service; the DBX desktop app is not required.",
-    "developerName": "DBX contributors",
+    "shortDescription": "Official DBX Web in Codex",
+    "longDescription": "Open the complete official DBX Docker Web workbench directly from the Codex sidebar. Start and update the official stable version locally without the DBX desktop app.",
+    "developerName": "skyfour",
     "category": "developer-tools",
     "capabilities": [
       "Database queries",

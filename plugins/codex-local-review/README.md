@@ -2,6 +2,30 @@
 
 在 Codex 侧栏打开“本地代码审查”，或输入“打开本地代码审查”。参考 Sublime Merge 的仓库浏览与差异审阅流程，提供本地人工 Review，无需远程仓库。
 
+## 前置条件与安装限制
+
+- macOS、Node.js ≥22.13（建议 Node 24 LTS，含 npm）、Git，以及已登录的 Codex 桌面版与 CLI。
+- CLI 需支持 `codex plugin`，桌面版需支持 MCP Apps；`node`、`git` 和 `codex` 需能被桌面应用找到。
+- 普通本地审查与 Git 提交可独立使用。TAPD 关联另需同机安装、配置任务看板；Fetch／Pull／Push 使用本机已有 Git／SSH 认证。
+- 当前完整安装仅支持 macOS。代码预览只读；Stage、提交、切换分支等修改仅通过明确的 Git 操作执行。具体边界见[本地数据与限制](#本地数据与限制)。
+
+## 安装与更新
+
+还未克隆仓库时，先按[仓库快速开始](../../README.md#快速开始)获取源码；以下命令均在仓库根目录执行。
+
+```sh
+npm run install:local-review
+```
+
+只安装和注册本地代码审查。更新时执行：
+
+```sh
+git pull --ff-only
+npm run install:local-review
+```
+
+重新打开 Codex，确认插件已启用，再点击左侧「本地代码审查」或输入「打开本地代码审查」。更新保留本机审查记录；只执行 `git pull` 不会更新已安装实例。
+
 ## 打开与切换项目
 
 - 点击“打开项目…”或 `⌘O`，用 macOS 文件夹窗口选择一个或多个项目。选择 Git 仓库内的子目录也会自动定位仓库根目录。
@@ -37,11 +61,7 @@
 
 本版对齐项目打开、项目切换、工作区/历史浏览和差异审阅；暂不实现分叉后的 Git 合并、冲突解决、完整提交关系图、字符级差异或 AI 审查。提交历史展示最近 100 条，审查历史按项目分别展示最近 100 条。
 
-在仓库根目录执行 `npm run install:local-review` 安装；更新时先执行 `git pull --ff-only`，再运行同一命令。该命令对应此目录的独立 `install.mjs` 入口，只安装或更新代码审查。验证：`npm test`、`npm run check`、`npm run test:local-review-ui`（需要 Chrome）。
-
 参考：[Sublime Merge 官方入门文档](https://www.sublimemerge.com/docs/getting_started)、[差异上下文](https://www.sublimemerge.com/docs/diff_context)。
-
-0.3.1 合并顶部项目工具栏，统一深浅主题与控件样式；项目、分支及文件名保持单行省略，悬停显示全文。干净工作区隐藏无效差异工具栏，并提供浏览提交历史和刷新入口。
 
 ## Stage / Unstage
 
@@ -88,3 +108,22 @@ TAPD 关键字旁、展开后的完整提交预览均提供复制图标。提交
 差异区按 Sublime Merge 的操作层级提供「工作区」的 Stage All / Unstage All / Discard All，当前文件的 Stage / Unstage / Discard，以及每个 Git 改动块的 Stage Hunk / Unstage Hunk / Discard Hunk。全部操作覆盖仓库全部符合条件的文件，不受左侧搜索影响；Discard 只丢弃未暂存内容，保留暂存区，但会删除列出的未跟踪文件，执行前必须确认。局部操作使用后端 Git 生成的补丁，部分暂存文件在 Summary 的暂存 / 未暂存分区及对应 M、S 文件标签中分别执行局部操作。
 
 所有写操作共用仓库锁，并核对预览状态。历史比较保持只读。操作执行后刷新分支、文件与提交编辑区，保留提交草稿。详见[交互与领域边界](../../docs/git-workbench.md)。
+
+
+## 常见问题
+
+**没有安装任务看板也能提交吗？** 可以。取消 TAPD 关联后按普通 Git 流程提交；需要关联时再安装并配置任务看板，并从其导入任务。
+
+**应用 TAPD 后为什么要求重新核对说明？** 「应用到提交说明」会覆盖整段文字，提交使用当前编辑区内容。关联任务时必须保留当前完整关键字的独立一行；切换任务不会自动重写已有草稿。
+
+**切换工作分支与切换提交历史范围有什么区别？** 顶部中央分支下拉执行 Git 检出；提交历史中的当前／全部／指定分支只控制哪些 commit 可见，不改工作分支。
+
+**大文件打不开或批注提示已变化？** 超限时可在设置中调整允许范围，或先浏览其他文件。文件内容或比较基线改变后需刷新再审阅，避免批注落到旧版本。
+
+**换电脑后找不到审查记录？** 审查记录与评论只存本机；Git push 不会同步它们。可以导出 Markdown／JSON 供查看，迁移数据库前先关闭对应服务。
+
+## 开发与验证
+
+在插件目录执行 `npm ci`、`npm test` 和 `npm run check`；在仓库根目录执行 `npm run test:local-review-ui` 运行完整浏览器回归，需要 Chrome。开发时可用 `LOCAL_REVIEW_HOME` 指定隔离目录。
+
+修改审查 UI、Git 刷新或异步状态后，发布前需完成整个 UI 套件。测试产物路径与各项检查见[仓库开发说明](../../README.md#开发与验证)。版本变化见[更新记录](../../CHANGELOG.md)。

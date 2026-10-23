@@ -1,11 +1,14 @@
 {
   "mcpServers": {
     "dbx": {
-      "command": "./bin/dbx-codex",
-      "args": [],
+      "command": "node",
+      "args": [
+        "servers/server.mjs"
+      ],
       "cwd": ".",
       "env_vars": [
-        "DBX_CODEX_DATA_DIR"
+        "DBX_CODEX_DOCKER_HOME",
+        "DBX_CODEX_DOCKER_PORT"
       ]
     }
   }

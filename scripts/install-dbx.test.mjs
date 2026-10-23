@@ -2,34 +2,65 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { installDbxArchive, sha256 } from './install-dbx.mjs';
 
-test('DBX 包校验成功后填充运行文件，校验失败不改动已安装文件', () => {
-  const root = mkdtempSync(join(tmpdir(), 'codex-dbx-test-'));
-  try {
-    const source = join(root, 'source/plugins/dbx');
-    mkdirSync(join(source, '.codex-plugin'), { recursive: true });
-    mkdirSync(join(source, 'bin'), { recursive: true });
-    mkdirSync(join(source, 'assets'), { recursive: true });
-    writeFileSync(join(source, '.codex-plugin/plugin.json'), JSON.stringify({ name: 'dbx', version: '0.6.39' }));
-    writeFileSync(join(source, 'bin/dbx-codex'), 'gateway');
-    writeFileSync(join(source, 'bin/dbx-web'), 'backend');
-    writeFileSync(join(source, 'assets/workbench.html'), '<main>DBX</main>');
-    const archive = join(root, 'dbx.tar.gz');
-    const tar = spawnSync('tar', ['-czf', archive, '-C', join(root, 'source'), 'plugins']);
-    assert.equal(tar.status, 0, tar.stderr?.toString());
-    const pluginDir = join(root, 'installed');
-    mkdirSync(pluginDir);
-    installDbxArchive(pluginDir, archive, sha256(archive), '0.6.39');
-    assert.equal(readFileSync(join(pluginDir, 'bin/dbx-web'), 'utf8'), 'backend');
-    assert.equal(JSON.parse(readFileSync(join(pluginDir, '.installed-release.json'), 'utf8')).version, '0.6.39');
-    assert.throws(() => installDbxArchive(pluginDir, archive, '0'.repeat(64), '0.6.39'), /SHA-256/);
-    assert.throws(() => installDbxArchive(pluginDir, archive, sha256(archive), '0.6.40'), /版本/);
-    assert.equal(readFileSync(join(pluginDir, 'bin/dbx-web'), 'utf8'), 'backend');
-    assert.ok(existsSync(join(pluginDir, 'assets/workbench.html')));
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+const root = fileURLToPath(new URL('../', import.meta.url));
+const json = path => JSON.parse(readFileSync(path, 'utf8'));
+function validateFixture(t, change = () => {}) {
+  const fixture = mkdtempSync(join(tmpdir(), 'codex-dbx-config-'));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  for (const relative of ['.agents/plugins/marketplace.json', 'scripts/validate.mjs', 'plugins/dbx/.codex-plugin/plugin.json', 'plugins/dbx/.mcp.json', 'plugins/dbx/package.json', 'plugins/dbx/package-lock.json']) {
+    const path = join(fixture, relative);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, readFileSync(join(root, relative)));
   }
+  const marketPath = join(fixture, '.agents/plugins/marketplace.json');
+  const market = json(marketPath);
+  market.plugins = market.plugins.filter(plugin => plugin.name === 'dbx');
+  writeFileSync(marketPath, JSON.stringify(market));
+  for (const relative of ['plugins/dbx/assets/icon.png', 'plugins/dbx/LICENSE', 'plugins/dbx/servers/server.mjs']) {
+    mkdirSync(dirname(join(fixture, relative)), { recursive: true });
+    writeFileSync(join(fixture, relative), 'fixture');
+  }
+  change(fixture);
+  return spawnSync(process.execPath, [join(fixture, 'scripts/validate.mjs')], { encoding: 'utf8' });
+}
+function patchJson(fixture, relative, change) {
+  const path = join(fixture, relative);
+  const value = json(path);
+  change(value);
+  writeFileSync(path, JSON.stringify(value));
+}
+
+test('DBX 使用锁定 SDK 的轻量 Node 插件，不再携带固定 DBX 官方版本清单', t => {
+  const result = validateFixture(t);
+  assert.equal(result.status, 0, result.stderr);
+  const pkg = json(join(root, 'plugins/dbx/package.json'));
+  assert.deepEqual(pkg.dependencies, { '@modelcontextprotocol/sdk': '1.30.0', acorn: '8.15.0' });
+  assert.equal(pkg.scripts.check, 'node tests/smoke.mjs');
+  assert.equal(existsSync(join(root, 'plugins/dbx/release.json')), false);
+});
+
+for (const [name, change] of [
+  ['拒绝旧原生可执行入口', value => { value.mcpServers.dbx.command = './bin/dbx-codex'; }],
+  ['拒绝任意 Node 参数入口', value => { value.mcpServers.dbx.args = ['--eval', 'process.exit()']; }],
+  ['拒绝缺失持久化目录变量', value => { value.mcpServers.dbx.env_vars = ['DBX_CODEX_DOCKER_PORT']; }],
+  ['拒绝继承旧原生数据目录变量', value => { value.mcpServers.dbx.env_vars.push('DBX_CODEX_DATA_DIR'); }],
+]) {
+  test(`DBX 配置校验${name}`, t => {
+    const result = validateFixture(t, fixture => patchJson(fixture, 'plugins/dbx/.mcp.json', change));
+    assert.notEqual(result.status, 0, result.stdout);
+  });
+}
+
+test('DBX SDK 不允许浮动版本或安装阶段自动运行 Docker', t => {
+  const result = validateFixture(t, fixture => patchJson(fixture, 'plugins/dbx/package.json', value => {
+    value.dependencies['@modelcontextprotocol/sdk'] = '^1.30.0';
+  }));
+  assert.notEqual(result.status, 0, result.stdout);
+  const scripts = json(join(root, 'plugins/dbx/package.json')).scripts;
+  assert.equal(scripts.preinstall, undefined);
+  assert.equal(scripts.postinstall, undefined);
 });
