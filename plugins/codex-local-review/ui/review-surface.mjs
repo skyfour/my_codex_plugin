@@ -131,6 +131,13 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
   const s=state(),owner=JSON.stringify([s.project?.id,s.review?.id||'live',s.scope]);
   if(owner!==cacheOwner){stopFollowing();cacheOwner=owner;generation++;observer?.disconnect();cache.clear();options.clear();collapsed.clear();cards.clear();cardNodes.clear();sectionsByMode.clear();summaryContainer.replaceChildren();loadedBytes=0;signature='';summaryScroll=0;}
   if(lastFull!==$('fullContext').checked){lastFull=$('fullContext').checked;for(const o of options.values())o.full=lastFull;}renderTabs();showActive();if(active.kind!=='summary'||!s.project)return;
+  if(s.scope.mode==='commit'){
+   const c=s.repository?.commits?.find(c=>c.sha===s.scope.target);let meta=summaryContainer.querySelector('.summary-commit-meta');
+   if(c){
+    if(!meta){const projectId=s.project.id,sha=c.sha;meta=el('header',undefined,'summary-commit-meta');const actions=el('div',undefined,'summary-commit-actions toolbar'),message=copyTextButton(()=>{const current=state();return current.project?.id===projectId?current.repository?.commits?.find(c=>c.sha===sha)?.message:undefined;},'复制完整提交信息'),hash=copyTextButton(sha,'复制完整提交哈希');message.dataset.copyCommitMessage='';hash.dataset.copyCommitHash='';actions.append(message,hash);meta.append(el('h2',c.title),el('p',`${c.author} · ${localDate(c.date)} · ${c.sha.slice(0,12)}`,'muted'),actions);summaryContainer.prepend(meta);}
+    const message=meta.querySelector('[data-copy-commit-message]'),error=c.messageError??'';message.disabled=typeof c.message!=='string'||!c.message;if(message.dataset.messageError!==error){message.dataset.messageError=error;message.title=error||'复制完整提交信息';}
+   }
+  }
   const sections=groups(s),next=JSON.stringify([s.project.id,s.review?.id,s.review?.version,s.scope,sections.map(g=>[g.mode,g.items.map(f=>[f.path,f.fingerprint,f.digest,f.reviewed])]),s.layout,$('wrapCode').checked,$('fullContext').checked]);
   if(signature===next&&!force){decorateViews();busy(s.busy);return;}const position=positionFollow||capturePosition({preferFocus:false}),viewport=column.getBoundingClientRect();
   // Read current bounds together before reconciling or painting. Cached cards
@@ -142,7 +149,6 @@ export function createReviewSurface({state,readFile,select,mutateFile,mutateHunk
   for(const [k,card] of cardNodes){if(!records.has(k))card.remove();if(!allRecords.has(k)){cards.delete(card);cardNodes.delete(k);options.delete(k);collapsed.delete(k);}}
   for(const [mode,section] of sectionsByMode)if(!sections.some(g=>g.mode===mode&&g.items.length)){section.remove();if(!allSections.some(g=>g.mode===mode&&g.items.length))sectionsByMode.delete(mode);}
   summaryContainer.querySelector('.empty-state')?.remove();
-  if(s.scope.mode==='commit'&&!summaryContainer.querySelector('.summary-commit-meta')){const c=s.repository?.commits?.find(c=>c.sha===s.scope.target);if(c){const meta=el('header',undefined,'summary-commit-meta');meta.append(el('h2',c.title),el('p',`${c.author} · ${localDate(c.date)} · ${c.sha.slice(0,12)}`,'muted'));summaryContainer.prepend(meta);}}
   observer=new IntersectionObserver(changes=>{for(const change of changes)if(change.isIntersecting){const c=cards.get(change.target);if(c&&!collapsed.has(key(c)))void load(change.target,c);observer.unobserve(change.target);}},{root:column,rootMargin:'400px'});
   let sectionIndex=s.scope.mode==='commit'&&summaryContainer.querySelector('.summary-commit-meta')?1:0;
   for(const g of sections){if(!g.items.length)continue;let section=sectionsByMode.get(g.mode);

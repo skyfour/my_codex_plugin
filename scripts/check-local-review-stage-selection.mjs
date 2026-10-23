@@ -48,9 +48,10 @@ try{
   await page.waitForFunction(()=>{const d=document.querySelector('iframe')?.contentDocument,c=d?.querySelector('.detail-column');if(!c)return false;const sample=JSON.stringify([c.scrollTop,c.scrollHeight,[...d.querySelectorAll('[data-loading=true]')].length]);const s=window.stageLayoutSample??={};if(s.value!==sample){s.value=sample;s.since=performance.now();return false;}return performance.now()-s.since>350;});
  }
  async function prepare(source,neighbour){
-  // A real navigation click releases any earlier asynchronous anchor before
-  // positioning the next fixture. Programmatic setup scrolling is not input.
+  // Summary rendering may establish a new anchor. Cancel it with a real reading
+  // gesture before programmatic fixture positioning, just as user input does.
   await f.getByRole('tab',{name:'Summary',exact:true}).click();await idle();
+  await f.locator('[data-review-summary] .summary-section-header h2').first().click();
   await card(source,neighbour).locator('.summary-file-header').scrollIntoViewIfNeeded();await card(source,neighbour).locator('.diff-table').waitFor();
   await card(source).locator('.summary-file-header').scrollIntoViewIfNeeded();await card(source).locator('.diff-table').waitFor();await settle();
   await card(source).locator('.summary-file-header').scrollIntoViewIfNeeded();await settle();assert.equal((await geometry(source)).visible,true,'fixture must begin with its operated header in the viewport');
