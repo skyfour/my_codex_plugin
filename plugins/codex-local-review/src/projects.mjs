@@ -44,7 +44,7 @@ export class Projects{
   let head=null;try{head=(await gitRead(p.path,['rev-parse','--verify','--quiet','HEAD^{commit}'])).trim();}catch(error){if(error.code!==1)throw error;}
   const targets=historyMode==='selected'?[...new Set(historyRefs.map(ref=>known.get(ref)).filter(Boolean))]:head?[head]:[];
   const hasCommits=targets.length>0||historyMode==='all'&&branches.length>0,commits=[];
-  if(hasCommits){const values=(await gitRead(p.path,['log','--topo-order','-100','-z','--date=iso-strict','--format=%H%x00%P%x00%an%x00%aI%x00%s',...(historyMode==='all'?['--branches','--remotes']:[]),'--end-of-options',...targets,'--'])).split('\0');for(let i=0;i+4<values.length;i+=5){commits.push({sha:values[i],parents:values[i+1].split(' ').filter(Boolean),author:values[i+2],date:values[i+3],title:values[i+4],refs:tips.get(values[i])??[]});}}
+  if(hasCommits){const values=(await gitRead(p.path,['log','--topo-order','-100','-z','--date=iso-strict','--format=%H%x00%P%x00%an%x00%aI%x00%s%x00%B',...(historyMode==='all'?['--branches','--remotes']:[]),'--end-of-options',...targets,'--'])).split('\0');for(let i=0;i+5<values.length;i+=6){commits.push({sha:values[i],parents:values[i+1].split(' ').filter(Boolean),author:values[i+2],date:values[i+3],title:values[i+4],message:values[i+5],refs:tips.get(values[i])??[]});}}
   return {branch,head,branches,commits,historyMode,historyRefs,missingHistoryRefs};
  }
 }

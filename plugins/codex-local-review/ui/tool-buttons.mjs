@@ -18,12 +18,32 @@ const toolIcons={
  unified:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h10M7 16h6"/>',
  stage:'<path d="M4 4h16v16H4ZM8 12h8M12 8v8"/>',
  unstage:'<path d="M4 4h16v16H4ZM8 12h8"/>',
- reviewed:'<path d="M4 4h16v16H4ZM8 12l3 3 5-6"/>'
+ reviewed:'<path d="M4 4h16v16H4ZM8 12l3 3 5-6"/>',
+ copy:'<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',
+ copied:'<path d="m5 12 4 4L19 6"/>'
 };
 function iconTool(node,icon,hint=node.title||node.textContent){
  const label=document.createElement('span');label.className='sr-only';label.textContent=node.textContent;
  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.7');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');svg.setAttribute('aria-hidden','true');svg.innerHTML=toolIcons[icon];
  node.replaceChildren(svg,label);node.classList.add('icon-button');node.title=hint;return node;
+}
+async function writeClipboardText(text){
+ try{if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(text);return;}}catch{/* Embedded hosts may deny the async Clipboard API. */}
+ const active=document.activeElement,selection=window.getSelection(),ranges=selection?[...Array(selection.rangeCount)].map((_,i)=>selection.getRangeAt(i).cloneRange()):[],inputSelection=typeof active?.selectionStart==='number'&&ranges.every(range=>range.collapsed)?{start:active.selectionStart,end:active.selectionEnd,direction:active.selectionDirection}:null,scrolls=new Map(),position={x:window.scrollX,y:window.scrollY};
+ const capture=node=>{for(let current=node?.nodeType===1?node:node?.parentElement;current;current=current.parentElement)scrolls.set(current,[current.scrollLeft,current.scrollTop]);};capture(active);for(const range of ranges)capture(range.commonAncestorContainer);capture(document.scrollingElement);
+ const field=document.createElement('textarea');field.value=text;field.readOnly=true;field.tabIndex=-1;field.setAttribute('aria-hidden','true');field.style.cssText='position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+ try{(active?.closest('dialog[open]')??document.body).append(field);field.focus({preventScroll:true});field.select();if(document.execCommand?.('copy')!==true)throw Error('无法访问剪贴板');}
+ finally{field.remove();if(active?.isConnected)active.focus({preventScroll:true});if(selection){selection.removeAllRanges();for(const range of ranges)selection.addRange(range);}if(inputSelection&&active?.isConnected)active.setSelectionRange(inputSelection.start,inputSelection.end,inputSelection.direction);for(const [node,[left,top]] of scrolls){node.scrollLeft=left;node.scrollTop=top;}window.scrollTo(position.x,position.y);}
+}
+function copyTextButton(value,label){
+ let copying=false,timer;
+ const b=iconTool(button(label,async()=>{
+  if(copying)return;copying=true;clearTimeout(timer);delete b.dataset.copyState;iconTool(b,'copy',label);b.setAttribute('aria-busy','true');
+  try{const text=typeof value==='function'?value():value;if(typeof text!=='string'||!text)throw Error('没有可复制的文本');await writeClipboardText(text);b.dataset.copyState='success';iconTool(b,'copied',label+' · 已复制');status('已复制'+label.replace(/^复制/,''));}
+  catch{b.dataset.copyState='error';b.title=label+' · 复制失败，请手动复制';status('复制失败：无法访问剪贴板，请手动选择文本后复制',true);}
+  finally{copying=false;b.removeAttribute('aria-busy');timer=setTimeout(()=>{delete b.dataset.copyState;iconTool(b,'copy',label);},2000);}
+ }),'copy',label);
+ b.classList.add('copy-text-button');b.dataset.copyText='';b.setAttribute('aria-label',label);b.onpointerdown=event=>{if(event.button===0)event.preventDefault();};return b;
 }
 for(const [id,icon,hint] of [
  ['openProject','folder','打开项目（⌘O）'],['addProject','plus','打开另一个项目'],
