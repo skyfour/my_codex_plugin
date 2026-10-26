@@ -37,5 +37,5 @@
   $('check').onclick=async()=>{try{$('check').disabled=true;render(await tool('dbx_codex_check_update'));toast('已检查官方稳定版');}catch(error){toast(error.message);}finally{$('check').disabled=false;}};
   $('update').onclick=()=>$('confirm-update').showModal();$('cancel').onclick=()=>$('confirm-update').close();
   $('apply').onclick=async()=>{$('confirm-update').close();try{await tool('dbx_codex_update');await poll();}catch(error){toast(error.message);}};
-  (async()=>{try{const init=await request('ui/initialize',{appInfo:{name:'dbx-codex',version:'0.6.41'},appCapabilities:{},protocolVersion:'2026-01-26'});theme(init?.hostContext);parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');await start();setInterval(poll,2500);}catch(error){state('无法打开 DBX',error.message,true);}})();
+  (async()=>{try{const init=await request('ui/initialize',{appInfo:{name:'dbx-codex',version:'0.6.42'},appCapabilities:{},protocolVersion:'2026-01-26'});theme(init?.hostContext);parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');await start();setInterval(poll,2500);}catch(error){state('无法打开 DBX',error.message,true);}})();
 })();
