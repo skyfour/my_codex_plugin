@@ -1,0 +1,21 @@
+import {execFileSync} from 'node:child_process';
+import {mkdir,readFile,writeFile,copyFile,chmod,mkdtemp,rm} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {resolve,join} from 'node:path';
+import {tmpdir} from 'node:os';
+const args=process.argv.slice(2),get=key=>{const i=args.indexOf(key);return i<0?undefined:args[i+1];};
+const source=resolve(get('--source')??''),version=get('--version'),output=resolve(get('--output')??'native-artifacts');
+if(!get('--source')||!/^\d+\.\d+\.\d+$/.test(version??'')||process.platform!=='darwin'||!['arm64','x64'].includes(process.arch))throw Error('维护者构建用法（macOS）：node scripts/build-dbx-native.mjs --source <官方源码目录> --version <版本> [--output <目录>]');
+const capture=(command,args)=>execFileSync(command,args,{cwd:source,encoding:'utf8'}).trim(),run=(command,args)=>execFileSync(command,args,{cwd:source,stdio:'inherit'});
+const remote=capture('git',['remote','get-url','origin']).replace(/\.git$/,'');
+if(remote!=='https://github.com/t8y2/dbx')throw Error('仅从官方 t8y2/dbx 源码构建分发程序');
+if(capture('git',['rev-parse','HEAD'])!==capture('git',['rev-parse',`v${version}^{commit}`])||capture('git',['status','--porcelain']))throw Error('构建目录必须是未修改的对应官方版本标签');
+console.log(`维护者构建官方 DBX v${version}；最终安装用户无需 Rust、pnpm 或 Docker。`);
+run('pnpm',['install','--frozen-lockfile']);run('pnpm',['--filter','@dbx-app/mongo-shell','build']);run('pnpm',['build']);
+run('cargo',['build','--locked','--release','-p','dbx-web','--no-default-features','--features','embed-static,duckdb-sidecar,dynamodb,mq-admin,dbx-core/sqlite-bundled']);
+const binary=join(source,'target','release','dbx-web');if(capture(binary,['--version'])!==`dbx-web ${version}`)throw Error('原生二进制版本不匹配');
+await mkdir(output,{recursive:true});const stage=await mkdtemp(join(tmpdir(),'dbx-native-package-'));
+try{await copyFile(binary,join(stage,'dbx-web'));await chmod(join(stage,'dbx-web'),0o700);await copyFile(join(source,'LICENSE'),join(stage,'LICENSE'));
+ const name=`dbx-web_${version}_darwin-${process.arch}.tar.gz`,path=join(output,name);execFileSync('tar',['-czf',path,'-C',stage,'dbx-web','LICENSE']);
+ const sha=createHash('sha256').update(await readFile(path)).digest('hex');await writeFile(path+'.sha256',`${sha}  ${name}\n`);console.log(`已生成 ${name}，SHA-256 ${sha}`);
+}finally{await rm(stage,{recursive:true,force:true});}

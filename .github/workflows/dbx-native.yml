@@ -1,0 +1,50 @@
+name: Build DBX native Web
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Official DBX stable version (without v)
+        required: true
+        default: '0.6.55'
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Validate source version
+        env:
+          DBX_BUILD_VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$DBX_BUILD_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
+      - uses: actions/checkout@v5
+        with:
+          repository: t8y2/dbx
+          ref: v${{ inputs.version }}
+          path: upstream
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: upstream/package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream
+          shared-key: dbx-web-${{ matrix.runner }}
+      - name: Build and verify native package
+        env:
+          DBX_BUILD_VERSION: ${{ inputs.version }}
+        run: node scripts/build-dbx-native.mjs --source upstream --version "$DBX_BUILD_VERSION" --output native-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dbx-native-${{ matrix.runner }}
+          path: native-artifacts/*
+          if-no-files-found: error
