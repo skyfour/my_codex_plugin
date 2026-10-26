@@ -24,6 +24,18 @@ async function fixture(t,overrides={}){
 }
 async function jobFinished(app){for(let index=0;index<200;index++){const view=await app.view();if(view.job?.phase!=='running')return view;await delay(5);}throw Error('asynchronous Docker job did not settle');}
 
+// Do not block progress polling on a second Docker inspect while the same runtime is busy.
+test('sidebar starts forbid downloads and expose live progress without another Docker status call',async t=>{
+  const gate=deferred();let options;
+  const f=await fixture(t,{runtime:{ensure:value=>{options=value;value?.onProgress?.({stage:'compatibility',message:'正在检查官方界面'});return gate.promise;},status:async()=>{throw Error('status must not run during the active job');}}});
+  try {
+    await f.client.callTool({name:'dbx_codex_start',arguments:{}});
+    assert.equal(options.allowDownload,false);
+    const view=await f.app.view();assert.equal(view.job.phase,'running');assert.equal(view.job.progress.stage,'compatibility');
+    assert.equal(view.job.progress.message,'正在检查官方界面');
+  }finally{gate.resolve({phase:'ready',currentVersion:'0.6.52'});}
+});
+
 test('official MCP declarations, approval denial and all request arguments pass through without policy changes',async t=>{
   const f=await fixture(t);
   const initial=await f.client.listTools();assert.ok(!initial.tools.some(tool=>tool.name==='dbx_query'));

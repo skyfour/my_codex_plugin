@@ -15,6 +15,8 @@
 
 DBX 表格中的版本是 **Codex 适配器版本**。DBX 本体跟随官方稳定发行版，通过工作台中的更新入口独立更新，无需自行编译；上游交互有较大变化时需先更新适配器。
 
+> DBX 安装期预热为当前开发分支改动，尚未发布；本轮保留现有版本号，不更新正式插件缓存。
+
 ## 快速开始
 
 ### 1. 准备环境
@@ -32,7 +34,7 @@ DBX 表格中的版本是 **Codex 适配器版本**。DBX 本体跟随官方稳�
 | 任务看板 | TAPD 导入需要工作空间、账户完整姓名和 Access Token；会话关联需 CLI 支持 `app-server --stdio`；不回写 TAPD 状态 |
 | API 调试台 | 敏感变量与 Cookie 使用 macOS Keychain；请求从运行插件的本机发出 |
 | 本地代码审查 | Git／SSH 认证沿用本机配置；TAPD 任务关联另需同机任务看板，普通审查和提交可独立使用 |
-| DBX | 使用与更新官方 Web 时需运行 Docker Desktop 或兼容的本地 Docker Engine；不需要启动 DBX 桌面应用 |
+| DBX | 安装、使用与更新时需运行 Docker Desktop 或兼容的本地 Docker Engine，并能通过 `docker info` 访问；不需要启动 DBX 桌面应用 |
 
 可先在终端检查：
 
@@ -59,7 +61,7 @@ cd my_codex_plugin
 
 例如，只需要代码审查就执行 `npm run install:local-review`；希望关联 TAPD 任务时，再执行 `npm run install:task-panel`。
 
-每个命令只安装所选插件的锁定依赖、执行所需构建与 MCP 检查，再注册到 `my-codex-plugins` 市场。没有默认安装的插件。**安装 DBX 插件不会启动 Docker、拉取镜像、创建容器或修改数据库数据**。
+每个命令安装所选插件的锁定依赖，执行所需构建与 MCP 检查，再注册到 `my-codex-plugins` 市场。没有默认安装的插件。**安装 DBX 时还会先准备官方 Docker 服务**：首次下载官方镜像、创建并启动容器，完成健康与嵌入兼容预检后才注册插件。终端会显示各阶段进度；Docker、网络或预检失败会使安装失败，不会报告安装成功。已有容器与数据会保留，重跑安装不会强制更新 DBX 本体。
 
 ### 3. 在 Codex 中打开
 
@@ -70,7 +72,7 @@ cd my_codex_plugin
 | 任务看板 | 在设置中配置 TAPD 数据源与本地凭据；从「导入任务」查询、勾选并确认 |
 | API 调试台 | 新建请求，或导入 Postman 集合、环境和 cURL；敏感值通过变量引用 |
 | 本地代码审查 | 打开本地项目，浏览工作区或提交历史，添加批注并保存审查记录 |
-| DBX | 确认 Docker 后台已运行；打开侧栏即启动或复用服务，在完整工作台中设置密码并添加连接 |
+| DBX | 安装已完成镜像与服务准备；侧栏复用或启动已有容器，在官方工作台中设置首次密码并添加连接 |
 
 前三个插件也支持在聊天中输入「打开任务看板」「打开 API 调试台」「打开本地代码审查」。DBX 直接点击左侧 DBX 图标。
 
@@ -99,13 +101,15 @@ npm run update:dbx
 
 通过嵌入兼容预检的 DBX 本体版本可直接更新；上游接口变化时可能仍需适配器更新。适配器自身更新使用 `git pull --ff-only` 和 `npm run install:dbx`。
 
+已安装插件需要补做首次准备或恢复服务时，先启动 Docker，再在仓库根目录运行 `npm run setup:dbx`。该命令复用已有服务与数据，不强制更新本体，也不注册或更新 Codex 插件；明确升级本体仍使用 `npm run update:dbx`。侧栏缺少已准备的容器时会提示先运行安装或准备命令，不在打开面板时首次拉取镜像。
+
 ### 一次明确选择多个插件
 
 ```sh
 node scripts/install.mjs --plugin codex-task-panel --plugin codex-local-review
 ```
 
-`--plugin` 可重复使用；不带参数只显示帮助。`--prepare` 也必须明确列出插件，只准备源码依赖，不注册到 Codex。
+`--plugin` 可重复使用；不带参数只显示帮助。`--prepare` 也必须明确列出插件，只准备源码依赖、构建与 MCP 检查，不启动 Docker、创建运行数据或注册到 Codex。
 
 ## 数据与换电脑安装
 
@@ -126,6 +130,8 @@ node scripts/install.mjs --plugin codex-task-panel --plugin codex-local-review
 
 **安装后没有左侧入口，或仍显示旧版？** 检查安装脚本是否成功、插件是否启用，再重新打开 Codex 并新建聊天。终端能运行命令但桌面应用找不到时，检查桌面应用继承的 PATH。
 
+**DBX 安装或首次准备失败？** 先检查 Docker 后台、`docker info` 和终端中显示的网络、端口或兼容预检错误。解决后，未完成安装时重跑 `npm run install:dbx`；已安装时可运行 `npm run setup:dbx` 补准备，再重试侧栏。保留现有数据目录，不需要删除连接和历史。
+
 **更新会清空数据吗？** 插件安装和更新保留各自的本机数据目录。DBX Docker 改造使用新目录，旧原生数据也保留，但不会自动导入；不要把新界面中的空列表当作旧数据被删除。
 
 **支持 Windows／Linux 吗？** 当前完整安装流程仅验证 macOS。API 调试台依赖 macOS Keychain；DBX 使用官方 Docker 镜像，不再绑定 Apple Silicon 原生包，其他系统的完整安装仍需单独验证。
@@ -138,6 +144,7 @@ node scripts/install.mjs --plugin codex-task-panel --plugin codex-local-review
 | --- | --- |
 | `npm run prepare:plugins` | 显式准备任务看板、API 调试台和代码审查，不注册插件 |
 | `npm run install:dbx -- --prepare` | 单独准备 DBX 适配器，不注册插件或启动 Docker |
+| `npm run setup:dbx` | 准备或恢复官方 DBX Docker 服务，完成健康与兼容预检；不注册插件或强制更新本体 |
 | `npm run validate` | 检查市场、插件版本、MCP 入口与锁定依赖 |
 | `npm test` | 验证结构、安装选择与各插件 Node 测试 |
 | `npm run check` | 检查 API 调试台、代码审查和 DBX 的 stdio MCP 与内联界面；DBX 检查不启动 Docker |

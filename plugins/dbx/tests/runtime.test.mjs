@@ -18,7 +18,7 @@ async function fixture(t, options = {}) {
     const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
     if (args[0] === 'info') return docker.daemon ? ok('28.0.0') : { code: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon' };
     if (args[0] === 'inspect') return docker.container ? ok(JSON.stringify([docker.container])) : { code: 1, stdout: '', stderr: `Error: No such object: ${args.at(-1)}` };
-    if (args[0] === 'pull') { await docker.onPull?.(); if (docker.failPull) return { code: 1, stdout: '', stderr: 'secret-value-from-docker-error' }; const version = args[1].split(':').at(-1); docker.imageVersions.set(`sha256:${version.replaceAll('.', '').padEnd(64, '0')}`, version); return ok(); }
+    if (args[0] === 'pull') { await docker.onPull?.(commandOptions); if (docker.failPull) return { code: 1, stdout: '', stderr: 'secret-value-from-docker-error' }; const version = args[1].split(':').at(-1); docker.imageVersions.set(`sha256:${version.replaceAll('.', '').padEnd(64, '0')}`, version); return ok(); }
     if (args[0] === 'image' && args[1] === 'inspect') { const version = args[2].split(':').at(-1); return ok(JSON.stringify([{ Id: `sha256:${version.replaceAll('.', '').padEnd(64, '0')}` }])); }
     if (args[0] === 'run') {
       const env = [], labels = {}, mounts = [], ports = {};
@@ -53,6 +53,52 @@ async function fixture(t, options = {}) {
   const runtime = new DockerRuntime({ home, port: 54224, run, fetchImpl, healthTimeoutMs: 30, pollIntervalMs: 1, ...options });
   return { home: runtime.home, runtime, docker, setRelease(value) { release = value; } };
 }
+
+// Sidebar starts must never put a first registry download behind a blank workbench.
+test('sidebar start without a prepared container requests installation without fetching or pulling',async t=>{
+  const f=await fixture(t);f.setRelease({tag_name:'not-a-release'});
+  const result=await f.runtime.ensure({allowDownload:false});
+  assert.equal(result.code,'SETUP_REQUIRED');assert.match(result.message,/setup:dbx/);
+  assert.equal(f.docker.calls.some(args=>['pull','run','start'].includes(args[0])),false);
+});
+
+// The terminal and sidebar must see actual phases before a slow external operation resolves.
+test('first setup reports preparation stages and subsequent sidebar start reuses the prepared service',async t=>{
+  const f=await fixture(t),events=[];
+  const result=await f.runtime.ensure({onProgress:event=>events.push(event)});
+  assert.equal(result.phase,'ready');
+  assert.deepEqual(events.map(event=>event.stage),['docker','release','download','start','health','compatibility','ready']);
+  assert(events.every(event=>typeof event.message==='string'&&event.message.length>0));
+  assert(f.docker.calls.find(args=>args[0]==='run').includes('--pull=never'));
+  f.docker.calls.length=0;f.setRelease({tag_name:'not-a-release'});
+  assert.equal((await f.runtime.ensure({allowDownload:false})).phase,'ready');
+  assert.equal(f.docker.calls.some(args=>['pull','run','stop','rm'].includes(args[0])),false);
+});
+
+// Pull progress is emitted while blocked, and only recognized counters can reach the panel.
+test('download progress arrives before completion and never relays arbitrary Docker output',async t=>{
+  const f=await fixture(t),events=[];let entered,release;
+  const started=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;});
+  f.docker.onPull=async options=>{
+    options.onOutput('registry error private-value-must-not-leak\nabc123: Downlo');
+    options.onOutput('ading [==>] 2MB/10MB\n');entered();await gate;
+  };
+  const pending=f.runtime.ensure({onProgress:event=>events.push(event)});
+  try{
+    await started;assert(events.some(event=>event.stage==='download'&&event.message.includes('2MB / 10MB')));
+    assert.equal(events.some(event=>event.stage==='ready'),false);
+    assert.equal(JSON.stringify(events).includes('private-value'),false);
+  }finally{release();}
+  assert.equal((await pending).phase,'ready');
+});
+
+test('Docker command output streams to the observer before its result resolves',async()=>{
+  const chunks=[];let completed=false,sawOutput;
+  const first=new Promise(resolve=>{sawOutput=resolve;});
+  const pending=runDocker(process.execPath,['-e',"console.log('abc123: Downloading 2MB/10MB');setTimeout(()=>process.exit(0),50)"],{onOutput:chunk=>{chunks.push(chunk);sawOutput();}}).then(result=>{completed=true;return result;});
+  await first;assert.equal(completed,false);assert.match(chunks.join(''),/Downloading/);
+  assert.equal((await pending).code,0);
+});
 
 // A missing daemon must yield actionable status without attempting a pull or touching legacy DBX data.
 test('daemon unavailable is reported without container mutation', async t => {

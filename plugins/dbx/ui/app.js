@@ -21,10 +21,11 @@
     const running=value.job?.phase==='running';$('check').disabled=running;$('update').disabled=running;
     $('version').textContent=value.currentVersion?`官方 v${value.currentVersion}`:'官方 Docker Web';
     const latest=value.latest?.version??value.latest?.latestVersion;
-    $('activity').textContent=running?(value.job.kind==='update'?'正在备份并更新…':'正在启动官方 DBX…'):latest?`官方最新 v${latest}`:'';
+    const progress=value.job?.progress?.message,elapsed=Math.max(0,Math.floor((Date.now()-Date.parse(value.job?.startedAt))/1000));
+    $('activity').textContent=running?(progress||(value.job.kind==='update'?'正在备份并更新…':'正在连接本机 DBX…')):latest?`官方最新 v${latest}`:'';
     if(value.job?.phase==='failed'&&lastJob!==value.job.startedAt){toast(value.job.error||'操作失败，已保留数据');lastJob=value.job.startedAt;}
     if(value.job?.phase==='complete'&&value.job.kind==='update'&&lastJob!==value.job.startedAt){const version=value.job.result?.currentVersion;toast((version===value.job.fromVersion?`当前已是官方稳定版 v${version}`:`已更新至官方 v${version}`)+(value.job.result?.backupPath?`；备份：${value.job.result.backupPath}`:''));lastJob=value.job.startedAt;}
-    if(running){$('workbench').hidden=true;state(value.job.kind==='update'?'正在更新 DBX':'正在启动 DBX','正在准备并验证官方工作台。首次打开会下载官方镜像，请保持 Docker 后台运行。');}
+    if(running){$('workbench').hidden=true;state(value.job.kind==='update'?'正在更新 DBX':'正在连接 DBX',`${progress||'正在连接安装阶段已准备的本机工作台…'}\n已等待 ${Number.isFinite(elapsed)?elapsed:0} 秒，请保持 Docker 后台运行。`);}
     else if(value.phase==='ready'){
       if(frameUrl!==value.url||loadedVersion!==value.currentVersion){frameUrl=value.url;loadedVersion=value.currentVersion;frameOrigin=new URL(frameUrl).origin;$('workbench').src=frameUrl;}
       $('workbench').hidden=false;$('state').hidden=true;
