@@ -15,7 +15,7 @@ function write(path, value, options) {
   writeFileSync(path, value, options);
 }
 
-function fixture(t) {
+function fixture(t, { setupStatus = 0 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'codex-selective-install-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   cpSync(join(repositoryRoot, 'scripts'), join(root, 'scripts'), {
@@ -36,7 +36,15 @@ function fixture(t) {
     for (const relative of ['package.json', 'package-lock.json']) cpSync(join(source, relative), join(target, relative));
     if (manifest.skills) mkdirSync(join(target, manifest.skills), { recursive: true });
     for (const server of Object.values(mcp.mcpServers)) write(join(target, server.args.at(-1)), '// fixture');
-    if (name === 'dbx') write(join(target, 'LICENSE'), 'fixture');
+    if (name === 'dbx') {
+      write(join(target, 'LICENSE'), 'fixture');
+      write(join(target, 'scripts/manage.mjs'), `
+import { appendFileSync } from 'node:fs';
+appendFileSync(process.env.PLUGIN_INSTALL_TEST_LOG, JSON.stringify({ command: 'dbx-setup', args: process.argv.slice(2), cwd: process.cwd(), execPath: process.execPath }) + String.fromCharCode(10));
+console.log('DBX setup fixture: ${setupStatus === 0 ? 'ready' : 'failed'}');
+process.exit(${setupStatus});
+`);
+    }
   }
   const legacyApiEntry = 'plugins/codex-api-client/scripts/install-local.mjs';
   write(join(root, legacyApiEntry), readFileSync(join(repositoryRoot, legacyApiEntry)));
@@ -69,6 +77,7 @@ if (command === 'codex' && args[0] === 'plugin' && args[1] === 'add' && args[2].
           ...process.env,
           PATH: `${bin}:${process.env.PATH ?? ''}`,
           CODEX_HOME: codeHome,
+          DBX_CODEX_DOCKER_HOME: join(root, 'dbx-runtime'),
           PLUGIN_INSTALL_TEST_LOG: log,
           PLUGIN_INSTALL_TEST_TASK_VERSION: json(join(root, 'plugins/codex-task-panel/package.json')).version,
         },
@@ -90,7 +99,15 @@ function assertSelection(result, names, { prepare = false } = {}) {
   const registrations = result.calls.filter(call => call.command === 'provider');
   assert.equal(registrations.length, !prepare && names.includes('codex-task-panel') ? 1 : 0);
   if (registrations.length) assert.deepEqual(registrations[0].args, ['--register']);
-  assert.equal(result.calls.some(call => ['curl', 'tar', 'docker'].includes(call.command)), false, '安装插件不得下载原生程序或调用 Docker');
+  const setups = result.calls.filter(call => call.command === 'dbx-setup');
+  assert.equal(setups.length, !prepare && names.includes('dbx') ? 1 : 0, '仅普通 DBX 安装应预热官方服务');
+  if (setups.length) {
+    assert.deepEqual(setups[0].args, ['setup']);
+    assert.equal(basename(setups[0].cwd), 'dbx');
+    assert.equal(setups[0].execPath, process.execPath);
+  }
+  assert.equal(result.calls.some(call => ['curl', 'tar', 'docker'].includes(call.command)), false,
+    prepare || !names.includes('dbx') ? '其他插件和准备模式不得下载程序或调用 Docker' : '安装器只通过 DBX setup 管理官方服务');
   if (prepare) assert.equal(result.calls.some(call => call.command === 'codex'), false, '准备模式不得调用 Codex');
 }
 
@@ -159,4 +176,26 @@ test('DBX 准备只安装依赖和检查 MCP，不启动或更新 Docker', t => 
   assert.deepEqual(result.calls.filter(call => call.command === 'npm').map(call => call.args), [
     ['ci', '--no-audit', '--no-fund'], ['run', 'check'],
   ]);
+});
+
+test('DBX 安装在依赖和 MCP 检查后预热，全部成功后才注册插件', { skip: process.platform !== 'darwin' }, t => {
+  const result = fixture(t).run('scripts/install.mjs', ['--plugin', 'dbx', '--plugin', 'codex-local-review']);
+  assertSelection(result, ['dbx', 'codex-local-review']);
+  const setupIndex = result.calls.findIndex(call => call.command === 'dbx-setup');
+  const preparationIndices = result.calls.flatMap((call, index) => call.command === 'npm' ? [index] : []);
+  const registrationIndices = result.calls.flatMap((call, index) => call.command === 'codex' && ['marketplace', 'add'].includes(call.args[1]) ? [index] : []);
+  assert.ok(preparationIndices.every(index => index < setupIndex), result.output);
+  assert.ok(registrationIndices.length > 0 && registrationIndices.every(index => index > setupIndex), result.output);
+  assert.match(result.output, /DBX setup fixture: ready/);
+  assert.match(result.output, /安装完成/);
+});
+
+test('DBX 预热失败使安装失败，不注册任何所选插件或报告安装成功', { skip: process.platform !== 'darwin' }, t => {
+  const result = fixture(t, { setupStatus: 73 }).run('scripts/install.mjs', ['--plugin', 'codex-local-review', '--plugin', 'dbx']);
+  assert.notEqual(result.status, 0, result.output);
+  assert.equal(result.calls.filter(call => call.command === 'dbx-setup').length, 1, result.output);
+  assert.equal(result.calls.some(call => call.command === 'codex' && ['marketplace', 'add'].includes(call.args[1])), false, result.output);
+  assert.equal(result.calls.some(call => call.command === 'provider'), false, result.output);
+  assert.doesNotMatch(result.output, /安装完成/);
+  assert.match(result.output, /DBX setup fixture: failed/);
 });

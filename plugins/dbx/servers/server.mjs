@@ -15,7 +15,7 @@ const empty={type:'object',properties:{},additionalProperties:false};
 const output=data=>({content:[{type:'text',text:'DBX'}],structuredContent:data});
 
 export async function createDbxServer({runtime=configuredRuntime(),proxyFactory=createWebProxy,clipboard=writeClipboard,backendFactory}={}){
-  const server=new Server({name:'dbx-codex',version:'0.6.40'},{capabilities:{tools:{listChanged:true},resources:{}}});
+  const server=new Server({name:'dbx-codex',version:'0.6.41'},{capabilities:{tools:{listChanged:true},resources:{}}});
   let currentVersion=null;
   const proxy=await proxyFactory({upstream:runtime.baseUrl,getVersion:()=>currentVersion}), transfers=new Transfers(runtime.home);
   let backend=null,backendPromise=null,job=null,jobPromise=null,latest=null,backendTools=[],generation=0,closing=false,closePromise=null;
@@ -31,7 +31,7 @@ export async function createDbxServer({runtime=configuredRuntime(),proxyFactory=
     if(backend)return backend;if(backendPromise)return backendPromise;
     const currentGeneration=generation;
     const attempt=(async()=>{
-      const candidate=backendFactory?await backendFactory():new Client({name:'dbx-codex',version:'0.6.40'});
+      const candidate=backendFactory?await backendFactory():new Client({name:'dbx-codex',version:'0.6.41'});
       try{
         if(!backendFactory)await candidate.connect(new StreamableHTTPClientTransport(new URL('/mcp',runtime.baseUrl),{requestInit:{headers:{Authorization:`Bearer ${await runtime.token()}`}}}),{timeout:4000});
         const listed=await candidate.listTools(undefined,{timeout:4000});
@@ -43,18 +43,18 @@ export async function createDbxServer({runtime=configuredRuntime(),proxyFactory=
     })();backendPromise=attempt;return attempt;
   };
   const compatibilityBlocked=()=>job?.phase==='failed'&&job.result?.code==='WEB_COMPATIBILITY'&&!job.result?.rolledBack;
-  const view=async()=>{const state=await runtime.status();currentVersion=state.currentVersion;return {...state,...(compatibilityBlocked()?{phase:'error',message:job.error}:{}),job,latest,url:proxy.url,mcpReady:Boolean(backend)};};
+  const view=async()=>{const state=job?.phase==='running'?{phase:'starting',currentVersion,baseUrl:runtime.baseUrl}:await runtime.status();currentVersion=state.currentVersion;return {...state,...(compatibilityBlocked()?{phase:'error',message:job.error}:{}),job,latest,url:proxy.url,mcpReady:Boolean(backend)};};
   const begin=kind=>{
     if(closing)throw new Error('DBX 连接正在关闭');
     if(job?.phase==='running')return {job};
-    job={kind,phase:'running',startedAt:new Date().toISOString(),fromVersion:currentVersion};
+    job={kind,phase:'running',startedAt:new Date().toISOString(),fromVersion:currentVersion,progress:{stage:'docker',message:'正在检查 Docker 后台…'}};
     const current=job;
-    jobPromise=(async()=>{try{await disconnect();current.result=await runtime[kind]();if(current.result.phase!=='ready')throw new Error(current.result.message||'DBX 操作未完成');currentVersion=current.result.currentVersion;current.phase='complete';void connectBackend().catch(()=>{});}catch(error){current.phase='failed';current.error=error.message;}})();
+    jobPromise=(async()=>{try{await disconnect();current.result=await runtime[kind]({allowDownload:kind==='update',onProgress:progress=>{if(job===current&&current.phase==='running')current.progress=progress;}});if(current.result.phase!=='ready')throw new Error(current.result.message||'DBX 操作未完成');currentVersion=current.result.currentVersion;current.phase='complete';void connectBackend().catch(()=>{});}catch(error){current.phase='failed';current.error=error.message;}})();
     return {job};
   };
   register('dbx_codex_open',async()=>({name:'DBX',architecture:'official-docker-web'}),{render:true,description:'在 Codex 侧栏打开完整 DBX 官方 Web 工作台。'});
   register('dbx_codex_status',async()=>{const state=await view();if(state.phase==='ready'&&job?.phase!=='running'&&!backend&&!backendPromise)void connectBackend().catch(()=>{});return state;});
-  register('dbx_codex_start',async()=>begin('ensure'),{readonly:false,description:'用户打开工作台时启动或复用本插件管理的官方 Docker 容器。'});
+  register('dbx_codex_start',async()=>begin('ensure'),{readonly:false,description:'只启动或复用安装阶段已准备的官方 Docker 容器，不在侧栏首次下载镜像。'});
   register('dbx_codex_check_update',async()=>{latest=await runtime.latest();return view();},{description:'检查 DBX 官方稳定版，不替换运行中的容器。'});
   register('dbx_codex_update',async()=>begin('update'),{readonly:false,description:'仅响应用户点击更新：备份数据并更新官方镜像；会中断本插件的 DBX 操作。'});
   register('dbx_codex_clipboard',({text})=>clipboard(text),{readonly:false,schema:{type:'object',properties:{text:{type:'string',maxLength:4194304}},required:['text'],additionalProperties:false}});

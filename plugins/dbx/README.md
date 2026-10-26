@@ -6,15 +6,17 @@
 
 > 从适配器 **0.6.40** 起使用官方 Docker Web。升级前请先准备 Docker；旧原生版的数据会保留，但不会自动迁移。
 
+> 适配器 0.6.41 支持官方 DBX 0.6.55，并在安装阶段准备与验证本机工作台。
+
 ## 前置条件与安装限制
 
 - macOS、Node.js ≥22.13（建议 Node 24 LTS，含 npm）、Git，以及已登录的 Codex 桌面版与 CLI。
 - CLI 支持 `codex plugin`，桌面版支持 MCP Apps；`node`、`npm`、`codex` 和 `docker` 需位于桌面应用能继承的 PATH。
 - 已安装 **Docker Desktop 或兼容的本地 Docker Engine**，并能通过 `docker info` 访问本机 Docker 后台。
-- 首次启动与更新需要访问 GitHub 的官方发行信息和官方 Docker 镜像仓库。已有容器可以复用本机镜像。
+- 安装前先启动 Docker 后台。首次准备与更新需要访问 GitHub 的官方发行信息和官方 Docker 镜像仓库；已有容器可直接复用。
 - 当前完整安装流程仅验证 macOS。官方 Docker 镜像支持的架构由上游决定，不再要求下载本仓库的 Apple Silicon 原生包。
 
-插件安装只准备 Node 依赖并检查 MCP，**不会启动 Docker、拉取镜像、创建容器或操作数据库数据**。打开 DBX 侧栏后会启动或复用官方服务；更新需在工作台中明确确认。
+插件安装先准备 Node 依赖并检查 MCP，再在终端完成官方服务准备：首次拉取镜像、创建并启动容器，检查健康状态与嵌入兼容性。**全部成功后才注册到 Codex**；任一阶段失败会使安装失败，并在终端显示原因。已有容器与数据会保留，重跑安装不会强制升级 DBX 本体。
 
 ## 安装与更新插件
 
@@ -24,7 +26,7 @@
 npm run install:dbx
 ```
 
-只安装和注册 DBX，不安装任务看板、API 调试台或代码审查。适配器源码更新时执行：
+只准备官方服务并安装、注册 DBX，不安装任务看板、API 调试台或代码审查。首次下载等耗时步骤在安装终端中显示进度，完成后再打开侧栏。适配器源码更新时执行：
 
 ```sh
 git pull --ff-only
@@ -33,13 +35,21 @@ npm run install:dbx
 
 重新打开 Codex 并新建聊天，确认插件已启用，再点击左侧 DBX 图标。只运行 `git pull` 不会更新已安装的适配器。
 
-**插件版本与官方 DBX 版本分开管理。** 当前适配器版本为 `0.6.40`，它不再约束 Docker 中运行的 DBX 本体版本；当前官方版本在工作台顶部显示。通过兼容预检的官方版本可以直接更新；若上游改变了嵌入接口或出现无法适配的交互，仍需先更新适配器。
+**插件版本与官方 DBX 版本分开管理。** 当前适配器版本为 `0.6.41`，它不再约束 Docker 中运行的 DBX 本体版本；当前官方版本在工作台顶部显示。通过兼容预检的官方版本可以直接更新；若上游改变了嵌入接口或出现无法适配的交互，仍需先更新适配器。
+
+已安装插件需要单独补准备或恢复服务时，在相同环境配置下执行：
+
+```sh
+npm run setup:dbx
+```
+
+它会准备缺少的服务，或复用、启动已有容器，并完成健康与兼容预检；不会注册插件，也不强制更新 DBX 本体。明确升级使用独立的 `npm run update:dbx`。
 
 ## 第一次打开
 
-1. 启动本机 Docker 后台，并确认 `docker info` 正常。
-2. 点击 Codex 左侧 DBX 图标，插件会自动启动或复用官方 Web。首次会获取官方最新稳定发行版并拉取对应镜像。
-3. 服务就绪后，同一面板直接显示完整官方工作台。在其中完成首次密码设置，并按官方界面添加数据库连接。
+1. 安装前启动本机 Docker 后台，确认 `docker info` 正常，并等待 `npm run install:dbx` 成功。
+2. 点击 Codex 左侧 DBX 图标，插件会复用或启动已准备的容器，不在打开面板时首次拉取镜像。缺少容器时会提示先运行 `npm run install:dbx` 或 `npm run setup:dbx`。
+3. 同一面板显示完整官方工作台后，在其中完成首次密码设置，再按官方界面添加数据库连接。安装与准备命令不代设密码。
 
 后续打开会复用已有的健康容器；已停止的本插件容器可重新启动。关闭面板或 Codex 不会删除 Docker 容器、数据库连接和历史。
 
@@ -94,11 +104,13 @@ Codex 与终端管理命令应使用相同配置，确保它们管理同一个�
 
 ## 常见问题
 
+**为什么不把 Docker 镜像打包到插件 GitHub Release？** [官方已经提供预编译镜像](https://github.com/t8y2/dbx#self-hosted-docker)，安装时直接准备该镜像即可，无需本仓库再次编译或维护镜像副本。这样插件的发布频率不会限制官方 DBX 本体更新；镜像缓存在本机 Docker 中，侧栏不会首次下载。安装仍需联网访问官方发行信息与镜像仓库。
+
 **为什么还需要 Docker 后台？** DBX 本体运行在官方容器中，适配器只负责显示工作台和管理本机服务。它替代 DBX 桌面应用，不替代容器运行环境。
 
 **插件版本为什么和官方 DBX 版本不同？** Codex 插件设置显示适配器版本；工作台工具栏显示 Docker 中的官方 DBX 版本。更新本体点击「更新官方 DBX」，无需修改插件版本。
 
-**Docker 不可用或启动失败？** 先检查 Docker 后台和 `docker info`。网络、镜像下载、端口占用及容器冲突会在入口中显示；解决原因后可在原入口重试，不需要重新安装插件。
+**Docker 不可用或启动失败？** 先检查 Docker 后台和 `docker info`，再按终端或侧栏显示的网络、端口、容器冲突或兼容预检错误排查。未完成安装时重跑 `npm run install:dbx`；已安装插件可运行 `npm run setup:dbx` 补准备或恢复服务，再重试侧栏。无需删除数据目录或重新设置已有密码。
 
 **端口被占用怎么办？** 首次创建前设置空闲的 `DBX_CODEX_DOCKER_PORT`，并让 Codex 与终端命令保持一致。已有容器的端口不能仅修改变量后自动迁移；需要先核对归属、保留数据并安全重建，或使用新的运行目录创建独立实例。插件会拒绝端口不匹配的容器，也不会停止占用该端口的其他服务。
 
@@ -110,7 +122,7 @@ Codex 与终端管理命令应使用相同配置，确保它们管理同一个�
 
 ## 开发与验证
 
-只准备适配器依赖与 MCP 检查，不注册 Codex 或启动 Docker：
+只准备适配器依赖与 MCP 检查，不注册 Codex、启动 Docker 或创建运行数据：
 
 ```sh
 npm run install:dbx -- --prepare
@@ -130,21 +142,26 @@ Node 测试与 MCP smoke 不要求运行 Docker；`test:dbx-ui` 使用真实 Chr
 
 ```sh
 node plugins/dbx/scripts/manage.mjs status
+node plugins/dbx/scripts/manage.mjs setup
 node plugins/dbx/scripts/manage.mjs start
 node plugins/dbx/scripts/manage.mjs update
 ```
 
-开发时为这些命令指定独立的 `DBX_CODEX_DOCKER_HOME` 和 `DBX_CODEX_DOCKER_PORT`，例如 `/tmp/dbx-codex-dev` 与 `54225`（先确认端口空闲）。`status` 只查询状态；`start` 和 `update` 会实际管理该目录对应的 Docker 服务。
+开发时为这些命令指定独立的 `DBX_CODEX_DOCKER_HOME` 和 `DBX_CODEX_DOCKER_PORT`，例如 `/tmp/dbx-codex-dev` 与 `54225`（先确认端口空闲）。`status` 只查询状态；`setup` 可首次下载与准备服务，`start` 仅复用或启动已有容器，`update` 明确下载并升级本体。这三个命令会实际管理该目录对应的 Docker 服务。
 
 预览同一份内嵌界面而不注册到 Codex，可使用独立目录运行：
 
 ```sh
 DBX_CODEX_DOCKER_HOME=/tmp/dbx-codex-dev \
 DBX_CODEX_DOCKER_PORT=54225 \
+node plugins/dbx/scripts/manage.mjs setup
+
+DBX_CODEX_DOCKER_HOME=/tmp/dbx-codex-dev \
+DBX_CODEX_DOCKER_PORT=54225 \
 node plugins/dbx/scripts/preview.mjs
 ```
 
-打开终端打印的本机 URL 后会实际启动官方 Docker 服务。预览使用与 MCP 相同的工作台、工具和严格 iframe 沙箱，但并不代表已经更新 Codex 中的正式安装。
+先在独立目录完成服务准备，再打开预览终端打印的本机 URL；预览复用或启动已准备的容器。预览使用与 MCP 相同的工作台、工具和严格 iframe 沙箱，但并不代表已经更新 Codex 中的正式安装。
 
 ## 上游与许可
 

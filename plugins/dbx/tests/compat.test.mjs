@@ -61,6 +61,69 @@ test('unknown synchronous helper contracts fail closed, including on new officia
   assert.equal(rewrite('function changed(){window.confirm(t("diff.saveConfigPrompt"))}').changes, 1);
 });
 
+const oracleDiscardFixture = `
+function allowDiscard(){return !selected.value||!editing.value||!dirty.value||source.value===saved.value||window.confirm(t("oracleTrigger.discardSourceConfirm"))}
+async function openObject(){if(!allowDiscard())return;writes.push("object")}
+function togglePanel(){if(open.value){allowDiscard()&&writes.push("close")}else writes.push("open")}
+async function openType(){if(allowDiscard())writes.push("type")}
+function viewDdl(){allowDiscard()&&writes.push("ddl")}
+async function openSource(){if(open.value){if(!allowDiscard())return;writes.push("close-source")}else allowDiscard()&&await writeSource()}
+function editEvent(){allowDiscard()&&writes.push("event")}
+function closePanel(){allowDiscard()&&(writes.push("close-panel"),dirty.value=false)}`;
+
+test('official Oracle discard helper and all eight callers await consent before changing state', async () => {
+  const adapted = rewriteScript(oracleDiscardFixture, { version: '0.6.55' });
+  const pending = [];
+  const scope = { selected: { value: true }, editing: { value: true }, dirty: { value: true }, source: { value: 'draft' }, saved: { value: 'original' }, open: { value: true }, writes: [], t: x => x, __dbxCompat: { confirm: () => new Promise(resolve => pending.push(resolve)) } };
+  scope.writeSource = async () => scope.writes.push('source');
+  vm.runInNewContext(adapted.source + ';globalThis.actions={openObject,togglePanel,openType,viewDdl,openSource,editEvent,closePanel};', scope);
+  for (const [name, expected] of [['openObject', 'object'], ['togglePanel', 'close'], ['openType', 'type'], ['viewDdl', 'ddl'], ['openSource', 'close-source'], ['editEvent', 'event'], ['closePanel', 'close-panel'], ['openSource', 'source']]) {
+    scope.open.value = expected !== 'source'; scope.dirty.value = true; scope.writes.length = 0;
+    const cancelled = scope.actions[name]();
+    assert.deepEqual(scope.writes, [], `${name} must wait for the user`);
+    pending.shift()(false); await cancelled;
+    assert.deepEqual(scope.writes, [], `${name} must preserve cancellation`);
+    assert.equal(scope.dirty.value, true);
+    const approved = scope.actions[name]();
+    pending.shift()(true); await approved;
+    assert.deepEqual(scope.writes, [expected]);
+  }
+  scope.dirty.value = false; scope.writes.length = 0;
+  await scope.actions.openObject();
+  assert.deepEqual(scope.writes, ['object']); assert.equal(pending.length, 0);
+});
+
+test('Oracle discard helper rejects escaped references, changed shapes and synchronous valued callers', () => {
+  for (const suffix of ['globalThis.guard=allowDiscard;', 'function unsafe(){return allowDiscard()}', 'function unsafe(){if(allowDiscard())writes++;return true}', 'function unsafe(allowDiscard){allowDiscard()}']) {
+    assert.throws(() => rewriteScript(oracleDiscardFixture + suffix, { version: '0.6.55' }), CompatibilityError);
+  }
+  assert.throws(() => rewriteScript(oracleDiscardFixture.replace('source.value===saved.value', 'source.value!==saved.value'), { version: '0.6.55' }), CompatibilityError);
+  assert.throws(() => rewriteScript(oracleDiscardFixture.replace('oracleTrigger.discardSourceConfirm', 'oracleTrigger.newDiscardConfirm'), { version: '0.6.55' }), CompatibilityError);
+});
+
+test('new async discard handlers reject synchronous value consumers while preserving event and side-effect uses', () => {
+  for (const suffix of ['function consume(){if(togglePanel())writes.push("unsafe")}', 'function consume(){return togglePanel()}', 'function consume(){const result=togglePanel()}', 'function consume(){togglePanel()&&writes.push("unsafe")}', 'function consume(){return open.value?togglePanel():false}']) {
+    assert.throws(() => rewriteScript(oracleDiscardFixture + suffix, { version: '0.6.55' }), CompatibilityError);
+  }
+  const safe = oracleDiscardFixture + ';const handlers={onClick:togglePanel,action:()=>viewDdl()};function consume(){open.value&&closePanel();editEvent();}async function wait(){await togglePanel()}';
+  assert.equal(rewriteScript(safe, { version: '0.6.55' }).changes, 1);
+});
+
+test('official schema diff discard helper awaits confirmations in handlers and watcher callbacks', async () => {
+  const source = 'function allow(){return !dirty.value||window.confirm(t("objects.refreshDiscardConfirm"))}function compare(){if(!allow())return;writes.push("compare")}watch(mode,(next,previous)=>{allow()?(writes.push(next)):(mode.value=previous)});';
+  const adapted = rewriteScript(source, { version: '0.6.55' });
+  const pending = [], scope = { dirty: { value: true }, mode: { value: 'new' }, writes: [], t: x => x, __dbxCompat: { confirm: () => new Promise(resolve => pending.push(resolve)) } };
+  scope.watch = (_mode, callback) => { scope.watcher = callback; };
+  vm.runInNewContext(adapted.source + ';globalThis.compare=compare;', scope);
+  const cancelled = scope.compare(); assert.deepEqual(scope.writes, []);
+  pending.shift()(false); await cancelled; assert.deepEqual(scope.writes, []);
+  const change = scope.watcher('new', 'old'); assert.equal(scope.mode.value, 'new');
+  pending.shift()(false); await change; assert.equal(scope.mode.value, 'old'); assert.deepEqual(scope.writes, []);
+  const approved = scope.compare(); pending.shift()(true); await approved; assert.deepEqual(scope.writes, ['compare']);
+  assert.throws(() => rewriteScript(source + 'function escaped(){return allow()}'), CompatibilityError);
+  assert.throws(() => rewriteScript(source + 'const escaped=()=>allow()'), CompatibilityError);
+});
+
 test('minified boolean refresh branch retains its boolean contract', async () => {
   const adapted = rewriteScript('function r(){return dirty&&!window.confirm(t("objects.refreshDiscardConfirm"))?!1:s.refreshObjectSourceTab(id)}globalThis.r=r;');
   let answer;

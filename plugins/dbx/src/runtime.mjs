@@ -39,7 +39,7 @@ function compareVersions(a, b) {
 }
 
 // Docker is an external dependency; arguments are never interpreted by a shell.
-export function runDocker(command, args, { timeoutMs = 120_000 } = {}) {
+export function runDocker(command, args, { timeoutMs = 120_000, onOutput } = {}) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { shell: false, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', size = 0;
@@ -54,11 +54,16 @@ export function runDocker(command, args, { timeoutMs = 120_000 } = {}) {
       size += chunk.length;
       if (size > 8 * 1024 * 1024) { terminate(); return; }
       if (which === 'stdout') stdout += chunk; else stderr += chunk;
+      try { onOutput?.(chunk.toString()); } catch { /* Progress must not interrupt the command. */ }
     };
     child.stdout.on('data', append('stdout')); child.stderr.on('data', append('stderr'));
     child.on('error', error => { clearTimers(); reject(error); });
     child.on('close', code => { clearTimers(); resolvePromise({ code: code ?? 1, stdout, stderr }); });
   });
+}
+
+function reporter(onProgress) {
+  return (stage,message,extra={})=>{try{onProgress?.({stage,message,...extra});}catch{/* Progress is observational. */}};
 }
 
 export class DockerRuntime {
@@ -105,12 +110,12 @@ export class DockerRuntime {
     return token;
   }
 
-  async #command(args, timeoutMs) {
-    try { return await this.#run('docker', args, { shell: false, timeoutMs }); }
+  async #command(args, timeoutMs, options) {
+    try { return await this.#run('docker', args, { shell: false, timeoutMs, ...options }); }
     catch { throw new RuntimeError('DOCKER_UNAVAILABLE', 'Docker 未安装或后台未启动，请先启动 Docker。'); }
   }
-  async #must(args, code = 'DOCKER_COMMAND', message = 'Docker 操作失败，请查看 Docker 后台状态。', timeoutMs) {
-    const result = await this.#command(args, timeoutMs);
+  async #must(args, code = 'DOCKER_COMMAND', message = 'Docker 操作失败，请查看 Docker 后台状态。', timeoutMs, options) {
+    const result = await this.#command(args, timeoutMs, options);
     if (result.code !== 0) throw new RuntimeError(code, message);
     return result.stdout;
   }
@@ -164,10 +169,12 @@ export class DockerRuntime {
       return body.version === version && body.demoMode !== true;
     } catch { return false; }
   }
-  async #wait(version, imageId) {
+  async #wait(version, imageId, progress=()=>{}) {
+    progress('health','正在等待本机 DBX 服务就绪…');
     const deadline = Date.now() + this.#healthTimeout;
     do {
       if (await this.#health(version)) {
+        progress('compatibility','正在检查官方界面与 Codex 的兼容性…');
         try { await this.#verifyWeb({ baseUrl: this.baseUrl, version, imageId }); }
         catch { throw new RuntimeError('WEB_COMPATIBILITY', `DBX 官方 v${version} 界面未通过 Codex 兼容检查；升级备份将保留，请等待插件适配。`); }
         return;
@@ -215,16 +222,29 @@ export class DockerRuntime {
       } catch { /* A lock altered by another process is left for manual inspection. */ }
     };
   }
-  async #pull(release) {
-    await this.#must(['pull', release.image], 'PULL_FAILED', '无法拉取 DBX 官方镜像，现有容器和数据保持原状。', 10 * 60_000);
+  async #pull(release, progress=()=>{}) {
+    progress('download',`正在下载官方 DBX v${release.version} 镜像…`);
+    let pending='';
+    const onOutput=chunk=>{
+      pending=(pending+chunk).slice(-16384);const lines=pending.split(/[\r\n]/);pending=lines.pop();
+      for(const line of lines){
+        const match=line.match(/^[a-f0-9]{6,64}:\s+(Downloading|Extracting|Pull complete|Already exists|Download complete)\b/);
+        if(!match)continue;
+        const bytes=line.match(/\b(\d+(?:\.\d+)?\s*[kMGT]?B)\s*\/\s*(\d+(?:\.\d+)?\s*[kMGT]?B)\b/i);
+        const label={Downloading:'下载中',Extracting:'解压中','Pull complete':'镜像层已就绪','Already exists':'复用本地镜像层','Download complete':'镜像层下载完成'}[match[1]];
+        progress('download',`官方 DBX v${release.version} · ${label}${bytes?` ${bytes[1]} / ${bytes[2]}`:''}`);
+      }
+    };
+    await this.#must(['pull', release.image], 'PULL_FAILED', '无法拉取 DBX 官方镜像，现有容器和数据保持原状。', 10 * 60_000, {onOutput});
     const result = await this.#must(['image', 'inspect', release.image], 'IMAGE_INSPECT', '无法验证刚拉取的 DBX 官方镜像。');
     let id; try { id = JSON.parse(result)[0].Id; } catch { /* Validated below. */ }
     if (!IMAGE_ID.test(id)) throw new RuntimeError('IMAGE_INSPECT', 'DBX 镜像标识无效。');
     return id;
   }
-  async #launch(image, version, repository = this.#repository) {
+  async #launch(image, version, repository = this.#repository, progress=()=>{}) {
+    progress('start',`正在启动本地 DBX v${version}…`);
     await this.token();
-    await this.#must(['run', '--detach', '--name', this.#name, '--restart', 'unless-stopped',
+    await this.#must(['run', '--pull=never', '--detach', '--name', this.#name, '--restart', 'unless-stopped',
       '--label', `${PREFIX}owner=${OWNER}`, '--label', `${PREFIX}home=${this.#home}`, '--label', `${PREFIX}version=${version}`, '--label', `${PREFIX}repository=${repository}`,
       '--publish', `127.0.0.1:${this.#port}:4224`,
       '--mount', `type=bind,src=${join(this.#home, 'data')},dst=/app/data`,
@@ -232,21 +252,28 @@ export class DockerRuntime {
       '--env', `DBX_WEB_MCP_TOKEN_FILE=${TOKEN_TARGET}`, '--env', `DBX_WEB_MCP_ALLOWED_HOSTS=127.0.0.1:${this.#port}`, image], 'START_FAILED', 'DBX 容器启动失败，请检查端口占用或 Docker 状态。');
     const current = await this.#inspect();
     if (!current || current.Image !== image || current.version !== version) throw new RuntimeError('CONFLICT', 'DBX 容器身份发生变化，未继续操作。');
-    await this.#wait(version, image);
+    await this.#wait(version, image, progress);
     return current;
   }
-  async #startExisting(current) {
+  async #startExisting(current, progress=()=>{}) {
+    progress('start',`正在连接本地 DBX v${current.version}…`);
     if (!current.State?.Running) { await this.#must(['start', current.Id], 'START_FAILED', '无法启动现有 DBX 容器。'); }
-    await this.#wait(current.version, current.Image);
+    await this.#wait(current.version, current.Image, progress);
+    progress('ready',`DBX v${current.version} 已准备就绪`);
     return this.#result('ready', current);
   }
-  async ensure() {
+  async ensure({allowDownload=true,onProgress}={}) {
+    const progress=reporter(onProgress);
     let unlock;
     try {
+      progress('docker','正在检查 Docker 后台…');
       unlock = await this.#lock(); await this.#daemon(); const current = await this.#inspect();
-      if (current) return await this.#startExisting(current);
-      const release = await this.latest(), image = await this.#pull(release);
-      return this.#result('ready', await this.#launch(image, release.version), { latestVersion: release.version });
+      if (current) return await this.#startExisting(current,progress);
+      if(!allowDownload)throw new RuntimeError('SETUP_REQUIRED','DBX 尚未完成安装准备，请在插件仓库运行 npm run setup:dbx（首次安装使用 npm run install:dbx）。侧栏不会下载镜像。');
+      progress('release','正在确认官方 DBX 稳定版本…');
+      const release = await this.latest(), image = await this.#pull(release,progress);
+      const result=this.#result('ready', await this.#launch(image, release.version,this.#repository,progress), { latestVersion: release.version });
+      progress('ready',`DBX v${release.version} 已准备就绪`);return result;
     } catch (error) { return this.#error(error); }
     finally { await unlock?.(); }
   }
@@ -260,16 +287,20 @@ export class DockerRuntime {
     await this.#must(['rm', current.Id], 'REMOVE_FAILED', '无法替换已停止的 DBX 容器；数据未删除。');
   }
 
-  async update() {
+  async update({onProgress}={}) {
+    const progress=reporter(onProgress);
     let unlock, previous, backupPath, removed = false, stopped = false, release;
     try {
+      progress('docker','正在检查 Docker 后台…');
       unlock = await this.#lock(); await this.#daemon(); previous = await this.#inspect();
+      progress('release','正在确认官方 DBX 稳定版本…');
       release = await this.latest();
-      if (!previous) return this.#result('ready', await this.#launch(await this.#pull(release), release.version), { latestVersion: release.version });
-      if (compareVersions(release.version, previous.version) <= 0) return { ...await this.#startExisting(previous), latestVersion: release.version };
-      const image = await this.#pull(release);
+      if (!previous) return this.#result('ready', await this.#launch(await this.#pull(release,progress), release.version,this.#repository,progress), { latestVersion: release.version });
+      if (compareVersions(release.version, previous.version) <= 0) return { ...await this.#startExisting(previous,progress), latestVersion: release.version };
+      const image = await this.#pull(release,progress);
       const checked = await this.#inspect();
       if (!checked || checked.Id !== previous.Id || checked.Image !== previous.Image) throw new RuntimeError('CONFLICT', 'DBX 容器身份发生变化，已取消更新。');
+      progress('backup','正在停止旧服务并备份数据与密钥…');
       if (checked.State?.Running) await this.#must(['stop', '--time', '30', checked.Id], 'STOP_FAILED', 'DBX 未能正常停止，现有数据未替换。', 45_000);
       stopped = true;
       const offline = await this.#inspect();
@@ -279,7 +310,8 @@ export class DockerRuntime {
       await cp(join(this.#home, 'data'), join(backupPath, 'data'), { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true });
       await writeFile(join(backupPath, 'backup.json'), JSON.stringify({ fromVersion: previous.version, toVersion: release.version, imageId: previous.Image, createdAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
       await this.#stopAndRemove(previous); removed = true;
-      const current = await this.#launch(image, release.version);
+      const current = await this.#launch(image, release.version,this.#repository,progress);
+      progress('ready',`DBX v${release.version} 已准备就绪`);
       return this.#result('ready', current, { latestVersion: release.version, backupPath });
     } catch (error) {
       if (!removed) {
@@ -289,12 +321,13 @@ export class DockerRuntime {
         return this.#error(error, backupPath ? { backupPath } : {});
       }
       let rolledBack = false;
+      progress('rollback','新版启动失败，正在恢复原版本与升级前的数据…');
       try {
         const candidate = await this.#inspect();
         if (candidate) await this.#stopAndRemove(candidate);
         await rename(join(this.#home, 'data'), join(backupPath, 'failed-data'));
         await cp(join(backupPath, 'data'), join(this.#home, 'data'), { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true });
-        await this.#launch(previous.Image, previous.version, previous.repository); rolledBack = true;
+        await this.#launch(previous.Image, previous.version, previous.repository,progress); rolledBack = true;
       } catch { /* Backup and failed data remain for diagnosis; never claim rollback succeeded. */ }
       return this.#error(error, { currentVersion: rolledBack ? previous.version : null, latestVersion: release?.version, backupPath, rolledBack, servicePhase: rolledBack ? 'ready' : 'error', message: rolledBack ? (error.code === 'WEB_COMPATIBILITY' ? '新版本界面未通过兼容检查，已恢复原版本与升级前的数据和密钥；备份已保留。' : '更新失败，已恢复原版本与升级前的数据和密钥。') : '更新失败，自动恢复未完成；备份与故障数据已保留，请检查 Docker 后台。' });
     } finally { await unlock?.(); }

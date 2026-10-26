@@ -20,7 +20,7 @@ await mkdir(directory,{recursive:true});
 const temporary=await mkdtemp(join(tmpdir(),'dbx-browser-fixture-'));
 const home=join(temporary,'runtime'),copies=[],calls={ensure:0,update:0,latest:0,remove:0,setup:0,login:0,logout:0,workbench:0};
 const runtimeState={phase:'absent',currentVersion:null};
-let version='0.6.52',updateRelease=null,setup=false,load=0;
+let version='0.6.52',updateRelease=null,startRelease=null,setup=false,load=0;
 const expectedBytes=Buffer.from(Array.from({length:150123},(_,index)=>index*37%256));
 const appScript=`
 document.documentElement.dataset.fixtureScriptReady='yes';
@@ -62,7 +62,7 @@ const upstream=http.createServer(async(req,res)=>{
 upstream.on('connection',socket=>{sockets.add(socket);socket.once('close',()=>sockets.delete(socket));});
 upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
 const backend={listTools:async()=>({tools:[]}),close:async()=>{}};
-const runtime={home,baseUrl:`http://127.0.0.1:${upstream.address().port}`,status:async()=>({...runtimeState}),ensure:async()=>{calls.ensure++;Object.assign(runtimeState,{phase:'ready',currentVersion:version});return {...runtimeState};},latest:async()=>{calls.latest++;return {version:'0.6.53'};},update:async()=>{calls.update++;runtimeState.phase='starting';await new Promise(resolve=>{updateRelease=resolve;});version='0.6.53';Object.assign(runtimeState,{phase:'ready',currentVersion:version});return {...runtimeState};},token:async()=>{throw Error('fixture must not request a real MCP token');}};
+const runtime={home,baseUrl:`http://127.0.0.1:${upstream.address().port}`,status:async()=>({...runtimeState}),ensure:async options=>{assert.equal(options.allowDownload,false,'sidebar must never initiate image downloads');calls.ensure++;if(calls.ensure===1){options.onProgress({stage:'compatibility',message:'Fixture：正在验证本地已准备工作台'});await new Promise(resolve=>{startRelease=resolve;});}Object.assign(runtimeState,{phase:'ready',currentVersion:version});return {...runtimeState};},latest:async()=>{calls.latest++;return {version:'0.6.53'};},update:async()=>{calls.update++;runtimeState.phase='starting';await new Promise(resolve=>{updateRelease=resolve;});version='0.6.53';Object.assign(runtimeState,{phase:'ready',currentVersion:version});return {...runtimeState};},token:async()=>{throw Error('fixture must not request a real MCP token');}};
 let app,preview,browser,audit;
 try{
   app=await createDbxServer({runtime,clipboard:async text=>{copies.push(text);return {copied:true};},backendFactory:async()=>backend});
@@ -76,6 +76,15 @@ try{
   page.on('response',response=>{if(response.status()>=400)console.log(`FIXTURE HTTP ${response.status()} ${response.url()}`);});
   await page.goto(preview.url);
   const plugin=page.frameLocator('iframe[title="Codex MCP 开发宿主"]'),workbench=plugin.frameLocator('#workbench');
+  await audit.check('fixture: prepared startup shows the live stage and elapsed time without downloading images',async()=>{
+    await plugin.locator('#detail').filter({hasText:'Fixture：正在验证本地已准备工作台'}).waitFor();
+    assert.match(await plugin.locator('#detail').textContent(),/已等待 \d+ 秒/);
+    assert.match(await plugin.locator('#activity').textContent(),/正在验证本地已准备工作台/);
+    assert.equal(await plugin.locator('#workbench').isVisible(),false);
+    assert.equal(calls.ensure,1);assert.equal(calls.update,0);
+    await audit.screenshot('startup-progress');
+    startRelease();startRelease=null;
+  });
   await audit.check('fixture: sidebar auto-starts inside strict sandbox and shows the embedded setup screen',async()=>{
     assert.equal(await page.locator('iframe').getAttribute('sandbox'),'allow-scripts allow-same-origin');
     await workbench.getByRole('heading',{name:'设置 DBX 密码'}).waitFor();
@@ -194,11 +203,26 @@ try{
     assert.equal(await workbench.locator('#workspace').isVisible(),true);
     await audit.screenshot('narrow');
   });
+  await audit.check('fixture: missing preparation shows a terminal setup instruction and can be retried after setup',async()=>{
+    const ensure=runtime.ensure;
+    try{
+      runtime.ensure=async options=>{assert.equal(options.allowDownload,false);return {phase:'error',code:'SETUP_REQUIRED',message:'请先运行 npm run setup:dbx 完成安装准备，侧栏不会下载镜像。'};};
+      Object.assign(runtimeState,{phase:'absent',message:undefined});
+      await plugin.locator('#refresh').click();await plugin.locator('#retry').waitFor({state:'visible'});
+      await plugin.locator('#retry').click();
+      await plugin.locator('#detail').filter({hasText:'npm run setup:dbx'}).waitFor();
+      assert.match(await plugin.locator('#detail').textContent(),/侧栏不会下载镜像/);
+      assert.equal(await plugin.locator('#retry').isVisible(),true);
+      await audit.screenshot('setup-required');
+    }finally{runtime.ensure=ensure;}
+    await plugin.locator('#retry').click();await plugin.locator('#state').waitFor({state:'hidden'});
+    await workbench.getByRole('heading',{name:'Fixture DBX v0.6.53'}).waitFor();
+  });
   await audit.finish();
   await writeFile(join(directory,'dbx-docker-ui-scope.json'),JSON.stringify({fixtureOnly:true,realDocker:false,officialImage:false,externalLink:'host request only; no destination opened',checks:'actual shell, proxy, sandbox, bridges and export writer; synthetic upstream and runtime',calls,bytes:expectedBytes.length},null,2));
   console.log('DBX browser integration passed (fixture-only; real official Docker validation is separate).');
 }finally{
-  updateRelease?.();
+  startRelease?.();updateRelease?.();
   await browser?.close();await preview?.close();await app?.close();
   for(const socket of sockets)socket.destroy();await new Promise(resolve=>upstream.close(resolve));
   await rm(temporary,{recursive:true,force:true});

@@ -55,7 +55,7 @@ for (const [name, change] of [
   });
 }
 
-test('DBX SDK 不允许浮动版本或安装阶段自动运行 Docker', t => {
+test('DBX SDK 不允许浮动版本或 npm 依赖生命周期自动运行 Docker', t => {
   const result = validateFixture(t, fixture => patchJson(fixture, 'plugins/dbx/package.json', value => {
     value.dependencies['@modelcontextprotocol/sdk'] = '^1.30.0';
   }));

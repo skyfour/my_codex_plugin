@@ -100,6 +100,69 @@ function deferredRefresh(call, parents, source) {
   return { start: statement.start, end: next.end, text: `return ${deferred(test, operation, args)};` };
 }
 
+function eventHandlerReference(node, parent) {
+  if (parent?.type !== 'Property' || parent.value !== node || parent.computed || parent.method) return false;
+  const key = parent.key.name ?? parent.key.value;
+  return key === 'action' || /^on[A-Z]/.test(key);
+}
+
+function ignoredCallResult(call, ancestry) {
+  let child = call;
+  for (let i = ancestry.length - 2; i >= 0; i--) {
+    const parent = ancestry[i];
+    if (parent.type === 'ExpressionStatement' || parent.type === 'AwaitExpression' || (parent.type === 'UnaryExpression' && parent.operator === 'void')) return true;
+    if ((parent.type === 'LogicalExpression' && parent.right === child) || (parent.type === 'ConditionalExpression' && parent.test !== child)) { child = parent; continue; }
+    if (parent.type === 'SequenceExpression') { if (parent.expressions.at(-1) !== child) return true; child = parent; continue; }
+    if (parent.type === 'ArrowFunctionExpression' && parent.body === child) return eventHandlerReference(parent, ancestry[i - 1]);
+    return false;
+  }
+  return false;
+}
+
+function safeAsyncCaller(caller, ancestry, scope) {
+  const owner = ancestry[ancestry.indexOf(caller) - 1];
+  if (caller.type === 'ArrowFunctionExpression') return owner?.type === 'CallExpression' && owner.callee.type === 'Identifier' && owner.arguments.length === 2 && owner.arguments[0].type === 'Identifier' && owner.arguments[1] === caller && caller.params.length === 2 && caller.params.every(node => node.type === 'Identifier');
+  if (caller.type !== 'FunctionDeclaration' || !caller.id) return false;
+  let valid = true;
+  visit(scope, [], (node, parents) => {
+    if (node.type !== 'Identifier' || node.name !== caller.id.name || node === caller.id) return;
+    const parent = parents.at(-1);
+    if (eventHandlerReference(node, parent)) return;
+    if (parent?.type !== 'CallExpression' || parent.callee !== node || !ignoredCallResult(parent, parents)) valid = false;
+  });
+  return valid;
+}
+
+function discardHelperCallers(call, fn, parents) {
+  const key = translationKey(call);
+  if (!['oracleTrigger.discardSourceConfirm', 'objects.refreshDiscardConfirm'].includes(key) || fn.type !== 'FunctionDeclaration' || !fn.id || fn.params.length || fn.generator || fn.body.body.length !== 1 || fn.body.body[0].type !== 'ReturnStatement') return;
+  const branches = [];
+  const flatten = node => { if (node?.type === 'LogicalExpression' && node.operator === '||') { flatten(node.left); flatten(node.right); } else branches.push(node); };
+  flatten(fn.body.body[0].argument);
+  const value = node => node?.type === 'MemberExpression' && !node.computed && node.object.type === 'Identifier' && node.property.name === 'value';
+  const clean = node => node?.type === 'UnaryExpression' && node.operator === '!' && value(node.argument);
+  const oracle = key === 'oracleTrigger.discardSourceConfirm' && branches.length === 5 && branches[4] === call && branches.slice(0, 3).every(clean) && branches[3]?.type === 'BinaryExpression' && branches[3].operator === '===' && value(branches[3].left) && value(branches[3].right);
+  const schemaDiff = key === 'objects.refreshDiscardConfirm' && branches.length === 2 && clean(branches[0]) && branches[1] === call;
+  if (!oracle && !schemaDiff) return;
+  const scope = parents[parents.indexOf(fn) - 1], callers = [], checked = new Set();
+  let valid = true;
+  visit(scope, [], (node, ancestry) => {
+    if (node.type !== 'Identifier' || node.name !== fn.id.name || node === fn.id) return;
+    const use = ancestry.at(-1), caller = [...ancestry].reverse().find(parent => functions.has(parent.type));
+    if (use?.type !== 'CallExpression' || use.callee !== node || use.optional || use.arguments.length || !caller || caller === fn || caller.generator) { valid = false; return; }
+    const owner = ancestry[ancestry.indexOf(caller) - 1];
+    if (!caller.async && (caller.body.type !== 'BlockStatement' || owner?.type === 'MethodDefinition' || (owner?.type === 'Property' && owner.method))) { valid = false; return; }
+    if (!caller.async) visit(caller.body, [], (statement, enclosing) => {
+      if (!enclosing.some(parent => functions.has(parent.type)) && statement.type === 'ReturnStatement' && statement.argument) valid = false;
+    });
+    if (!caller.async && !checked.has(caller)) { checked.add(caller); if (!safeAsyncCaller(caller, ancestry, scope)) valid = false; }
+    callers.push({ call: use, caller, awaited: ancestry.at(-2)?.type === 'AwaitExpression' });
+  });
+  // The reviewed v0.6.55 helpers have only direct local callers. An escaped
+  // reference or a changed boolean contract requires another source review.
+  return valid && callers.length ? callers : undefined;
+}
+
 /** Rewrite actual parsed native-dialog callsites, never strings or regex matches.
  * Unknown synchronous control flow stops loading instead of accepting a Promise
  * as a boolean or bypassing a destructive confirmation. The official image stays
@@ -120,7 +183,13 @@ export function rewriteScript(source, { version, filename = '' } = {}) {
     if (!fn.async) {
       const refresh = deferredRefresh(node, parents, source);
       if (refresh) { edits.push(refresh); return; }
-      if (!eventHandlerAllowed(node, fn, source)) throw new CompatibilityError(`${filename} ${version ?? '未知版本'} 同步 ${kind} 的返回值或调用方式需要人工适配`);
+      const discardCallers = kind === 'confirm' && discardHelperCallers(node, fn, parents);
+      if (discardCallers) {
+        for (const { call, caller, awaited } of discardCallers) {
+          if (!caller.async) asyncFunctions.add(caller.start);
+          if (!awaited) { edits.push({ start: call.start, end: call.start, text: '(await ' }); edits.push({ start: call.end, end: call.end, text: ')' }); }
+        }
+      } else if (!eventHandlerAllowed(node, fn, source)) throw new CompatibilityError(`${filename} ${version ?? '未知版本'} 同步 ${kind} 的返回值或调用方式需要人工适配`);
       // Object/class shorthand methods cannot be prefixed without accounting
       // for their key syntax. Current official callbacks use plain functions.
       if (parents.some(parent => (parent.type === 'MethodDefinition' || (parent.type === 'Property' && parent.method)) && parent.value === fn)) throw new CompatibilityError(`${filename} 同步方法 ${kind} 需要新的兼容适配`);
