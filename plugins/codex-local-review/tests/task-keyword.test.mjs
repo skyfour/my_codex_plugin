@@ -19,3 +19,16 @@ test('consumer rejects wrong task, blank keyword, control characters and oversiz
   const provider=new TaskContextProvider({request:async()=>({contractVersion:1,taskId,title:'Test',keyword:'valid',...patch})});await assert.rejects(provider.getCommitContext(taskId),/上下文/);
  }
 });
+
+// The browser and commit RPC use the same identity check.
+import {hasCommitKeyword} from '../ui/task-association.mjs';
+test('task association accepts edited commit descriptions and matches complete task identities',()=>{
+ for(const type of ['task','story','bug']){
+  const keyword=`--${type}=123@tapd-100 --user=fixture Official title https://example.invalid`;
+  for(const message of [`--${type}=123@tapd-100 --user=edited Phase two`,`Phase three\n\n--${type}=123@tapd-100`,`Phase four --${type}=123@tapd-100 additional details`])assert.equal(hasCommitKeyword(message,keyword),true,message);
+  for(const message of [`--${type}=1230@tapd-100`,`--${type}=123@tapd-1000`,`prefix--${type}=123@tapd-100`,`--${type}=123@tapd-100suffix`,'Phase without an identifier'])assert.equal(hasCommitKeyword(message,keyword),false,message);
+ }
+ assert.equal(hasCommitKeyword('--story=123@tapd-100','--task=123@tapd-100'),false);
+ assert.equal(hasCommitKeyword('--task=123@tapd-100',''),false);
+ assert.equal(hasCommitKeyword('arbitrary text','arbitrary text'),false);
+});
