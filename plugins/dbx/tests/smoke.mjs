@@ -51,7 +51,7 @@ try{
   assert.deepEqual(csp.resourceDomains,[]);
   assert.deepEqual(page._meta.ui.permissions,{clipboardWrite:{}});
   const opened=await client.callTool({name:'dbx_codex_open',arguments:{}});
-  assert.deepEqual(opened.structuredContent,{name:'DBX',architecture:'official-docker-web'});
+  assert.deepEqual(opened.structuredContent,{name:'DBX',architecture:'official-local-web'});
   assert.ok(!JSON.stringify({tools,resource,opened}).includes(secret));
   assert.ok(!JSON.stringify(resource).includes(home));
   assert.equal(existsSync(dockerLog),false,'安装检查不得调用 Docker');

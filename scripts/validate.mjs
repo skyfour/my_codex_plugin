@@ -33,7 +33,7 @@ for (const plugin of marketplace.plugins) {
     assert.equal(server.cwd, '.');
     if (plugin.name === 'dbx') {
       assert.deepEqual(server.args, ['servers/server.mjs']);
-      assert.deepEqual(server.env_vars, ['DBX_CODEX_DOCKER_HOME', 'DBX_CODEX_DOCKER_PORT']);
+      assert.deepEqual(server.env_vars, ['DBX_CODEX_RUNTIME', 'DBX_CODEX_NATIVE_HOME', 'DBX_CODEX_NATIVE_PORT', 'DBX_CODEX_NATIVE_BIN', 'DBX_CODEX_DOCKER_HOME', 'DBX_CODEX_DOCKER_PORT']);
     } else {
       assert.ok(server.args.includes('--experimental-sqlite'));
     }
@@ -46,7 +46,7 @@ for (const plugin of marketplace.plugins) {
     assert.equal(pkg.scripts.check, 'node tests/smoke.mjs');
     assert.equal(pkg.scripts.preinstall, undefined);
     assert.equal(pkg.scripts.postinstall, undefined);
-    assert.ok(!existsSync(resolve(path, 'release.json')), '官方运行版本由 Docker runtime 管理，不固定自建发布包');
+    assert.ok(!existsSync(resolve(path, 'release.json')), '运行版本由受校验的原生或 Docker 发布信息管理');
     assert.ok(existsSync(resolve(path, manifest.interface.logo)));
     assert.ok(existsSync(resolve(path, 'LICENSE')));
   }

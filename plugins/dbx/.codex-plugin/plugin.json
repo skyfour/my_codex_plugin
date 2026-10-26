@@ -1,7 +1,7 @@
 {
   "name": "dbx",
   "version": "0.6.42",
-  "description": "Official DBX Docker Web workbench inside Codex with local lifecycle controls.",
+  "description": "完整 DBX Web 工作台，默认原生运行，无需 Docker，可选 Docker 模式。",
   "author": {
     "name": "skyfour",
     "url": "https://github.com/skyfour/my_codex_plugin"
@@ -10,8 +10,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "DBX",
-    "shortDescription": "Official DBX Web in Codex",
-    "longDescription": "Open the complete official DBX Docker Web workbench directly from the Codex sidebar. Start and update the official stable version locally without the DBX desktop app.",
+    "shortDescription": "DBX Web，原生运行或 Docker",
+    "longDescription": "从 Codex 侧栏打开完整 DBX Web 工作台。新安装默认下载原生后端并在本机运行，Docker 模式可选，保留现有数据。",
     "developerName": "skyfour",
     "category": "developer-tools",
     "capabilities": [

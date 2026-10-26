@@ -52,7 +52,7 @@ test('official MCP declarations, approval denial and all request arguments pass 
 test('opening and rendering the sidebar do not eagerly start or update Docker or connect database tools',async t=>{
   const f=await fixture(t);
   const result=await f.client.callTool({name:'dbx_codex_open',arguments:{}});
-  assert.deepEqual(result.structuredContent,{name:'DBX',architecture:'official-docker-web'});
+  assert.deepEqual(result.structuredContent,{name:'DBX',architecture:'official-local-web'});
   const page=(await f.client.readResource({uri:UI_URI})).contents[0];
   assert.deepEqual(page._meta.ui.csp.frameDomains,['http://127.0.0.1:54321']);
   assert.equal(f.calls.backend,0);assert.equal(f.calls.ensure,0);assert.equal(f.calls.update,0);

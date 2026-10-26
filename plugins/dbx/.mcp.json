@@ -7,6 +7,10 @@
       ],
       "cwd": ".",
       "env_vars": [
+        "DBX_CODEX_RUNTIME",
+        "DBX_CODEX_NATIVE_HOME",
+        "DBX_CODEX_NATIVE_PORT",
+        "DBX_CODEX_NATIVE_BIN",
         "DBX_CODEX_DOCKER_HOME",
         "DBX_CODEX_DOCKER_PORT"
       ]
