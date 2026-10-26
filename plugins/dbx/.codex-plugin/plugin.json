@@ -1,6 +1,6 @@
 {
   "name": "dbx",
-  "version": "0.6.40",
+  "version": "0.6.41",
   "description": "Official DBX Docker Web workbench inside Codex with local lifecycle controls.",
   "author": {
     "name": "skyfour",
