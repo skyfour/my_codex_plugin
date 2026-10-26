@@ -47,16 +47,16 @@ export async function createDbxServer({runtime=configuredRuntime(),proxyFactory=
   const begin=kind=>{
     if(closing)throw new Error('DBX 连接正在关闭');
     if(job?.phase==='running')return {job};
-    job={kind,phase:'running',startedAt:new Date().toISOString(),fromVersion:currentVersion,progress:{stage:'docker',message:'正在检查 Docker 后台…'}};
+    job={kind,phase:'running',startedAt:new Date().toISOString(),fromVersion:currentVersion,progress:{stage:'runtime',message:'正在检查本机 DBX 服务…'}};
     const current=job;
     jobPromise=(async()=>{try{await disconnect();current.result=await runtime[kind]({allowDownload:kind==='update',onProgress:progress=>{if(job===current&&current.phase==='running')current.progress=progress;}});if(current.result.phase!=='ready')throw new Error(current.result.message||'DBX 操作未完成');currentVersion=current.result.currentVersion;current.phase='complete';void connectBackend().catch(()=>{});}catch(error){current.phase='failed';current.error=error.message;}})();
     return {job};
   };
-  register('dbx_codex_open',async()=>({name:'DBX',architecture:'official-docker-web'}),{render:true,description:'在 Codex 侧栏打开完整 DBX 官方 Web 工作台。'});
+  register('dbx_codex_open',async()=>({name:'DBX',architecture:'official-local-web'}),{render:true,description:'在 Codex 侧栏打开完整 DBX 官方 Web 工作台。'});
   register('dbx_codex_status',async()=>{const state=await view();if(state.phase==='ready'&&job?.phase!=='running'&&!backend&&!backendPromise)void connectBackend().catch(()=>{});return state;});
-  register('dbx_codex_start',async()=>begin('ensure'),{readonly:false,description:'只启动或复用安装阶段已准备的官方 Docker 容器，不在侧栏首次下载镜像。'});
-  register('dbx_codex_check_update',async()=>{latest=await runtime.latest();return view();},{description:'检查 DBX 官方稳定版，不替换运行中的容器。'});
-  register('dbx_codex_update',async()=>begin('update'),{readonly:false,description:'仅响应用户点击更新：备份数据并更新官方镜像；会中断本插件的 DBX 操作。'});
+  register('dbx_codex_start',async()=>begin('ensure'),{readonly:false,description:'只启动或复用安装阶段已准备的 DBX 本机服务，不在侧栏首次下载程序或镜像。'});
+  register('dbx_codex_check_update',async()=>{latest=await runtime.latest();return view();},{description:'检查 DBX 官方稳定版，不替换运行中的服务。'});
+  register('dbx_codex_update',async()=>begin('update'),{readonly:false,description:'仅响应用户点击更新：备份数据并更新 DBX 本机服务；会中断本插件的 DBX 操作。'});
   register('dbx_codex_clipboard',({text})=>clipboard(text),{readonly:false,schema:{type:'object',properties:{text:{type:'string',maxLength:4194304}},required:['text'],additionalProperties:false}});
   register('dbx_codex_transfer',({action,payload})=>transfers.action(action,payload),{readonly:false,schema:{type:'object',properties:{action:{type:'string',enum:['download-open','download-write','download-close','download-cancel']},payload:{type:'object'}},required:['action','payload'],additionalProperties:false}});
   server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:[...definitions,...backendTools]}));

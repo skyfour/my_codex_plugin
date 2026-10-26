@@ -14,8 +14,8 @@ const usage = `用法：
   node scripts/install.mjs --plugin <名称> [--plugin <名称> ...] [--prepare]
 
 可选插件：codex-task-panel、codex-api-client、codex-local-review、dbx
-没有默认安装的插件。安装 DBX 需先启动 Docker，完成官方服务预热后才注册。
---prepare 仅准备明确选择的插件依赖与 MCP，不启动 Docker，也不注册到 Codex。`;
+没有默认安装的插件。DBX 新安装默认使用原生后端，无需 Docker；安装阶段准备服务后才注册。
+--prepare 仅准备明确选择的插件依赖与 MCP，不启动本地服务，也不注册到 Codex。`;
 
 function parseArgs(args) {
   const names = [];
@@ -73,7 +73,7 @@ export function installPlugins(args = process.argv.slice(2)) {
   if (!prepare) {
     if (names.includes('dbx')) {
       const dbx = plugins.find(plugin => plugin.name === 'dbx');
-      console.log('准备 DBX 官方服务：首次下载镜像、启动与兼容预检将在终端完成。');
+      console.log('准备 DBX 本地服务：首次下载原生程序（或所选 Docker 镜像）、启动与兼容预检将在终端完成。');
       run(process.execPath, ['scripts/manage.mjs', 'setup'], resolve(root, dbx.source.path));
     }
     run('codex', ['plugin', 'marketplace', 'add', root]);

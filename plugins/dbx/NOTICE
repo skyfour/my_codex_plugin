@@ -5,6 +5,7 @@ DBX upstream: https://github.com/t8y2/dbx
 Adapter: https://github.com/skyfour/my_codex_plugin
 Licensed under Apache-2.0. Dependencies retain their respective licenses.
 
-This plugin contains the Codex adapter only. It does not redistribute a custom
-DBX binary or a modified DBX workbench. The full DBX Web application is run from
-the official t8y2/dbx Docker image (or its official CNB mirror).
+The adapter supports a native Web backend and the official Docker image.
+The macOS native Web executable is built from unmodified t8y2/dbx release tags
+and distributed separately with its upstream LICENSE. It is not an upstream
+macOS Web release. Dependencies retain their respective licenses.
