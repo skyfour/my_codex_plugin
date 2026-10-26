@@ -2,9 +2,12 @@
 :root {
  color-scheme:dark;
  --bg:light-dark(#fff,#1d2025); --panel:light-dark(#f8f9fb,#191c21);
- --panel2:light-dark(#eef1f5,#272c34); --border:light-dark(#e2e6ed,#343a44);
- --text:light-dark(#273345,#dde3ec); --muted:light-dark(#6b778a,#9ca8b9);
- --accent:light-dark(#3268d6,#94b9ff); --selected:light-dark(#eaf0fe,#28364e);
+ --panel2:light-dark(#e3e9f2,#303845); --border:light-dark(#c6cfdd,#414d5e);
+ --projects-bg:light-dark(#dce4ef,#151c26); --files-bg:light-dark(#eef2f7,#222b37);
+ --toolbar-bg:light-dark(#e4eaf2,#2b3543); --commit-bg:light-dark(#e5edf9,#26364b);
+ --section-bg:light-dark(#d7e1ee,#324055); --file-header-bg:light-dark(#e2eaf6,#2b3b50);
+ --text:light-dark(#273345,#dde3ec); --muted:light-dark(#4e5e73,#bbc6d5);
+ --accent:light-dark(#3268d6,#94b9ff); --selected:light-dark(#c8daf8,#3a5276);
  --add:light-dark(#eaf5ee,#21372c); --del:light-dark(#fbecee,#3d272e);
  --green:light-dark(#297945,#90cda2); --red:light-dark(#ae3d50,#e6a0ad);
  font:13px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -37,7 +40,8 @@ small,.muted{font-size:12px;color:var(--muted)}
 .project-tabs>.empty-list{padding:8px 10px}
 .workbench{display:grid;grid-template-columns:var(--project-sidebar-width,220px) 290px minmax(0,1fr);min-height:0;min-width:0;position:relative}
 .projects-column,.files-column{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden;border-right:1px solid var(--border);background:var(--panel)}
-.files-column{background:light-dark(#fcfcfd,#20242b)}
+.projects-column{background:var(--projects-bg)}
+.files-column{background:var(--files-bg)}
 .section-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:10px 14px;font-size:11px;color:var(--muted)}
 .section-heading h2{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;letter-spacing:.01em}
 .section-heading button{padding:0 6px;min-height:24px;border-color:transparent;background:transparent}
@@ -107,7 +111,7 @@ body[aria-busy=true] :is(button[data-path],button[data-project-id],button[data-s
 
 /* Commit is a persistent part of the worktree, alongside staging and diffs. */
 .detail-column{display:flex;flex-direction:column}#detail{height:auto;flex:1;min-height:0}.welcome{flex:1}
-.commit-workspace{flex:0 0 auto;max-height:45%;overflow:auto;border-bottom:1px solid var(--border);padding:14px 16px;background:var(--panel)}
+.commit-workspace{flex:0 0 auto;max-height:45%;overflow:auto;border-bottom:1px solid var(--border);padding:14px 16px;background:var(--commit-bg)}
 .commit-heading{display:flex;align-items:center;gap:10px;margin-bottom:10px;min-width:0}.commit-heading h2{font-size:13px;white-space:nowrap}.commit-heading>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px ui-monospace,monospace}.commit-heading button{font-size:11px;padding:3px 8px;min-height:26px}
 #gitCommitForm{display:grid;gap:8px}#commitSummary{min-height:68px;max-height:160px;resize:vertical;font-size:13px;background:var(--bg)}
 .commit-association{display:flex;align-items:center;gap:8px;min-width:0}.commit-association label{font-size:11px;color:var(--muted);white-space:nowrap}.commit-association select{flex:1;width:100%;font-size:12px;min-width:0}.commit-association button{font-size:11px}
@@ -130,11 +134,11 @@ body[aria-busy=true] :is(button[data-path],button[data-project-id],button[data-s
 @media(max-height:700px){.detail-column,.files-column{overflow-y:auto}.commit-workspace{max-height:none}#detail{flex:0 0 auto;min-height:420px}#files{flex:0 0 auto;min-height:100px}}
 .detail-tabs{display:flex;flex:none;overflow-x:auto;border-bottom:1px solid var(--border);background:var(--panel);min-height:37px;position:sticky;top:0;z-index:5}.detail-tabs button{border:0;border-radius:0;background:transparent;max-width:240px;overflow:hidden;text-overflow:ellipsis;padding:7px 13px;border-bottom:2px solid transparent}.detail-tabs [aria-selected=true]{background:var(--bg);color:var(--accent);border-bottom-color:var(--accent)}
 .detail-column[data-detail-view=summary]{overflow:auto;scroll-padding-top:var(--summary-top-inset,37px)}.detail-column[data-detail-view=summary] .commit-workspace{position:sticky;top:37px;z-index:4;max-height:45%;flex:none}.detail-column[data-detail-view=summary] #detail{flex:0 0 auto;height:auto;min-height:0}.detail-column[data-detail-view=summary] #code{overflow:visible;flex:none;min-height:0}.detail-column[data-detail-view=summary] .file-toolbar,.detail-column[data-detail-view=summary] #gitAll{display:none!important}.detail-column[data-detail-view=summary] #commentsPanel{max-height:none}.detail-column[data-detail-view=file] .commit-workspace{display:none!important}
-.summary-section{min-width:0}.summary-section-header{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:46px;padding:8px 12px;background:var(--panel);border-block:1px solid var(--border)}.summary-section-header h2{font-size:12px}.summary-section-header button,.summary-file-actions button{font-size:11px;min-height:27px;padding:3px 8px}
+.summary-section{min-width:0}.summary-section-header{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:46px;padding:8px 12px;background:var(--section-bg);border-block:1px solid var(--border)}.summary-section-header h2{font-size:12px}.summary-section-header button,.summary-file-actions button{font-size:11px;min-height:27px;padding:3px 8px}
 .summary-commit-meta{padding:18px 14px;border-bottom:1px solid var(--border)}.summary-commit-meta h2{font-size:15px;overflow-wrap:anywhere}.summary-commit-meta p{margin-top:8px;font-size:11px;overflow-wrap:anywhere}
 .summary-commit-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px}.copy-text-button[data-copy-state=success]{color:var(--green)}.copy-text-button[data-copy-state=error]{color:var(--red)}
 .summary-file{scroll-margin-top:8px}
-.summary-file{min-width:0}.summary-file-header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:42px;padding:6px 12px;background:var(--selected);border-bottom:1px solid var(--border);position:sticky;top:var(--summary-top-inset,37px);z-index:3}.summary-file-toggle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:left;border:0;background:transparent;font:12px/1.6 ui-monospace,Menlo,monospace;padding:4px 0}.summary-file-actions{display:flex;align-items:center;gap:6px;flex:none}.summary-file-actions .check{font-size:11px;margin-left:6px}.summary-file-body{min-height:50px}.summary-loading,.summary-error{padding:16px;margin:0;color:var(--muted);font-size:12px}.summary-error{color:var(--red)}
+.summary-file{min-width:0}.summary-file-header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:42px;padding:6px 12px;background:var(--file-header-bg);border-bottom:1px solid var(--border);position:sticky;top:var(--summary-top-inset,37px);z-index:3}.summary-file-toggle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;text-align:left;border:0;background:transparent;font:12px/1.6 ui-monospace,Menlo,monospace;padding:4px 0}.summary-file-actions{display:flex;align-items:center;gap:6px;flex:none}.summary-file-actions .check{font-size:11px;margin-left:6px}.summary-file-body{min-height:50px}.summary-loading,.summary-error{padding:16px;margin:0;color:var(--muted);font-size:12px}.summary-error{color:var(--red)}
 .diff-view{overflow-x:auto;min-width:0}.diff-hunk-header{display:flex;align-items:center;gap:10px;min-width:0}.diff-hunk-header .hunk-actions{margin-left:auto;float:none;flex:none}.context-toggle{font-size:10px;min-height:25px;padding:2px 7px;border-color:transparent;background:transparent}.hunk-location{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.change-location td{padding:5px 10px!important}
 @media(max-width:800px){.summary-file-header{flex-wrap:wrap;gap:4px;padding:6px 10px}.summary-file-toggle{flex-basis:100%}.summary-file-actions{margin-left:auto}.summary-section-header{flex-wrap:wrap;gap:6px}.diff-hunk-header{flex-wrap:wrap;gap:5px}.diff-hunk-header .hunk-actions{margin-left:auto}.summary-file-header{position:static}.detail-tabs button{font-size:11px;padding-inline:9px;max-width:180px}}
 
@@ -203,3 +207,10 @@ button.icon-button>svg{display:block;width:18px;height:18px;flex:none;pointer-ev
 .resizing-sidebar{user-select:none}.resizing-sidebar *{cursor:col-resize!important}
 .projects-collapsed .sidebar-resize,.review-fullscreen .sidebar-resize{display:none}
 @media(max-width:800px){.sidebar-resize{display:none}}
+
+/* Surface colours distinguish navigation, editing, and code without changing layout. */
+.topbar{background:var(--files-bg)}
+.project-tabs,.detail-header,.detail-tabs{background:var(--projects-bg)}
+.git-command-bar,.diff-toolbar{background:var(--toolbar-bg)}
+.review-banner,.file-toolbar{background:var(--files-bg)}
+#projects button[aria-current=true],#files button[aria-current=true],#commits button[aria-current=true],#reviews button[aria-current=true]{box-shadow:inset 3px 0 var(--accent)}
