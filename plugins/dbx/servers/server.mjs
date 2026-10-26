@@ -15,7 +15,7 @@ const empty={type:'object',properties:{},additionalProperties:false};
 const output=data=>({content:[{type:'text',text:'DBX'}],structuredContent:data});
 
 export async function createDbxServer({runtime=configuredRuntime(),proxyFactory=createWebProxy,clipboard=writeClipboard,backendFactory}={}){
-  const server=new Server({name:'dbx-codex',version:'0.6.41'},{capabilities:{tools:{listChanged:true},resources:{}}});
+  const server=new Server({name:'dbx-codex',version:'0.6.42'},{capabilities:{tools:{listChanged:true},resources:{}}});
   let currentVersion=null;
   const proxy=await proxyFactory({upstream:runtime.baseUrl,getVersion:()=>currentVersion}), transfers=new Transfers(runtime.home);
   let backend=null,backendPromise=null,job=null,jobPromise=null,latest=null,backendTools=[],generation=0,closing=false,closePromise=null;
@@ -31,7 +31,7 @@ export async function createDbxServer({runtime=configuredRuntime(),proxyFactory=
     if(backend)return backend;if(backendPromise)return backendPromise;
     const currentGeneration=generation;
     const attempt=(async()=>{
-      const candidate=backendFactory?await backendFactory():new Client({name:'dbx-codex',version:'0.6.41'});
+      const candidate=backendFactory?await backendFactory():new Client({name:'dbx-codex',version:'0.6.42'});
       try{
         if(!backendFactory)await candidate.connect(new StreamableHTTPClientTransport(new URL('/mcp',runtime.baseUrl),{requestInit:{headers:{Authorization:`Bearer ${await runtime.token()}`}}}),{timeout:4000});
         const listed=await candidate.listTools(undefined,{timeout:4000});

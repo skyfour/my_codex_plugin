@@ -18,7 +18,7 @@ async function fixture(t, options = {}) {
     const ok = (stdout = '') => ({ code: 0, stdout, stderr: '' });
     if (args[0] === 'info') return docker.daemon ? ok('28.0.0') : { code: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon' };
     if (args[0] === 'inspect') return docker.container ? ok(JSON.stringify([docker.container])) : { code: 1, stdout: '', stderr: `Error: No such object: ${args.at(-1)}` };
-    if (args[0] === 'pull') { await docker.onPull?.(commandOptions); if (docker.failPull) return { code: 1, stdout: '', stderr: 'secret-value-from-docker-error' }; const version = args[1].split(':').at(-1); docker.imageVersions.set(`sha256:${version.replaceAll('.', '').padEnd(64, '0')}`, version); return ok(); }
+    if (args[0] === 'pull') { await docker.onPull?.(commandOptions); if (docker.failPull || docker.failRepositories?.some(repository=>args[1].startsWith(repository+':'))) return { code: 1, stdout: '', stderr: docker.pullError??'secret-value-from-docker-error' }; const version = args[1].split(':').at(-1); docker.imageVersions.set(`sha256:${version.replaceAll('.', '').padEnd(64, '0')}`, version); return ok(); }
     if (args[0] === 'image' && args[1] === 'inspect') { const version = args[2].split(':').at(-1); return ok(JSON.stringify([{ Id: `sha256:${version.replaceAll('.', '').padEnd(64, '0')}` }])); }
     if (args[0] === 'run') {
       const env = [], labels = {}, mounts = [], ports = {};
@@ -114,7 +114,7 @@ test('ensure creates a pinned official container and reuses it with private toke
   const result = await runtime.ensure();
   assert.equal(result.phase, 'ready'); assert.equal(result.currentVersion, '0.6.52');
   assert.equal(result.baseUrl, 'http://127.0.0.1:54224');
-  assert(docker.calls.some(c => c[0] === 'pull' && c[1] === 't8y2/dbx:0.6.52'));
+  assert(docker.calls.some(c => c[0] === 'pull' && c[1] === 'docker.cnb.cool/dbxio.com/dbx:0.6.52'));
   assert.equal(docker.container.Config.Env.includes('DBX_WEB_MCP_TOKEN_FILE=/run/secrets/dbx-mcp-token'), true);
   assert.equal(docker.container.Config.Env.includes('DBX_WEB_MCP_ALLOWED_HOSTS=127.0.0.1:54224'), true);
   const token = await runtime.token(); assert.match(token, /^[a-f0-9]{64}$/);
@@ -194,7 +194,7 @@ test('latest resolves GitHub release JSON through an isolated local HTTP fixture
   const server = createServer((request, response) => { response.setHeader('content-type', 'application/json'); response.end(JSON.stringify({ tag_name: 'v0.6.52', draft: false, prerelease: false })); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)));
   const f = await fixture(t, { fetchImpl: fetch, releaseUrl: `http://127.0.0.1:${server.address().port}/releases/latest` });
-  assert.deepEqual(await f.runtime.latest(), { version: '0.6.52', image: 't8y2/dbx:0.6.52', url: 'https://github.com/t8y2/dbx/releases/tag/v0.6.52' });
+  assert.deepEqual(await f.runtime.latest(), { version: '0.6.52', image: 'docker.cnb.cool/dbxio.com/dbx:0.6.52', url: 'https://github.com/t8y2/dbx/releases/tag/v0.6.52' });
 });
 
 // Official DBX protects /api/version before login; setup/login screens are nevertheless a healthy workbench.
@@ -297,4 +297,32 @@ test('frontend verifier receives the actual immutable image ID for new, existing
   assert.match(verified[2].imageId,/^sha256:[a-f0-9]{64}$/);assert.notEqual(verified[2].imageId,oldImage);
   assert.equal(verified[3].imageId,oldImage);assert.equal(f.docker.container.Image,oldImage);
   assert(verified.every(identity=>identity.baseUrl==='http://127.0.0.1:54224'));
+});
+
+// Registry failures must not make every installer change their global Docker settings.
+test('default setup pulls CNB directly and records the source that actually supplied the image',async t=>{
+ const f=await fixture(t);assert.equal((await f.runtime.ensure()).phase,'ready');
+ assert.deepEqual(f.docker.calls.filter(c=>c[0]==='pull'),[['pull','docker.cnb.cool/dbxio.com/dbx:0.6.52']]);
+ assert.equal(f.docker.container.Config.Labels['io.skyfour.codex.dbx.repository'],'docker.cnb.cool/dbxio.com/dbx');
+});
+test('CNB failure falls back to Docker Hub and the resulting container stays reusable',async t=>{
+ const f=await fixture(t),events=[];f.docker.failRepositories=['docker.cnb.cool/dbxio.com/dbx'];
+ assert.equal((await f.runtime.ensure({onProgress:e=>events.push(e)})).phase,'ready');
+ assert.deepEqual(f.docker.calls.filter(c=>c[0]==='pull').map(c=>c[1]),['docker.cnb.cool/dbxio.com/dbx:0.6.52','t8y2/dbx:0.6.52']);
+ assert.equal(f.docker.container.Config.Labels['io.skyfour.codex.dbx.repository'],'t8y2/dbx');
+ assert(events.some(e=>e.message.includes('t8y2/dbx')));assert.equal(JSON.stringify(events).includes('secret-value'),false);
+ f.docker.calls.length=0;assert.equal((await f.runtime.ensure({allowDownload:false})).phase,'ready');assert.equal(f.docker.calls.some(c=>c[0]==='pull'),false);
+});
+test('an explicit Docker Hub primary can recover through CNB when its mirror denies access',async t=>{
+ const f=await fixture(t,{imageRepository:'t8y2/dbx'});f.docker.failRepositories=['t8y2/dbx'];
+ assert.equal((await f.runtime.ensure()).phase,'ready');
+ assert.deepEqual(f.docker.calls.filter(c=>c[0]==='pull').map(c=>c[1]),['t8y2/dbx:0.6.52','docker.cnb.cool/dbxio.com/dbx:0.6.52']);
+ assert.equal(f.docker.container.Config.Labels['io.skyfour.codex.dbx.repository'],'docker.cnb.cool/dbxio.com/dbx');
+});
+test('update can change registry while preserving data and reporting both sources when all pulls fail',async t=>{
+ const f=await fixture(t);f.setRelease({tag_name:'v0.6.51'});await f.runtime.ensure();await writeFile(join(f.home,'data/dbx.db'),'existing data');
+ f.docker.failRepositories=['docker.cnb.cool/dbxio.com/dbx'];f.setRelease({tag_name:'v0.6.52'});
+ assert.equal((await f.runtime.update()).phase,'ready');assert.equal(f.docker.container.Config.Labels['io.skyfour.codex.dbx.repository'],'t8y2/dbx');assert.equal(await readFile(join(f.home,'data/dbx.db'),'utf8'),'existing data');
+ const oldImage=f.docker.container.Image;f.docker.pullError='403 Forbidden secret-value-from-docker-error';f.docker.failPull=true;f.docker.calls.length=0;f.setRelease({tag_name:'v0.6.53'});const result=await f.runtime.update();
+ assert.equal(result.code,'PULL_FAILED');assert.match(result.message,/403/);assert.match(result.message,/docker\.cnb\.cool/);assert.match(result.message,/t8y2\/dbx/);assert.equal(JSON.stringify(result).includes('secret-value'),false);assert.equal(f.docker.container.Image,oldImage);assert.equal(f.docker.calls.some(c=>['stop','rm','run'].includes(c[0])),false);
 });

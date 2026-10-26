@@ -68,7 +68,7 @@ function reporter(onProgress) {
 
 export class DockerRuntime {
   #home; #port; #run; #fetch; #repository; #releaseUrl; #name; #healthTimeout; #pollInterval; #verifyWeb;
-  constructor({ home = join(homedir(), '.codex', 'dbx-docker'), port = 54224, run = runDocker, fetchImpl = globalThis.fetch, imageRepository = 't8y2/dbx', releaseUrl = RELEASE_URL, healthTimeoutMs = 60_000, pollIntervalMs = 500, verifyWeb = async () => {} } = {}) {
+  constructor({ home = join(homedir(), '.codex', 'dbx-docker'), port = 54224, run = runDocker, fetchImpl = globalThis.fetch, imageRepository = 'docker.cnb.cool/dbxio.com/dbx', releaseUrl = RELEASE_URL, healthTimeoutMs = 60_000, pollIntervalMs = 500, verifyWeb = async () => {} } = {}) {
     if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('DBX 端口必须是 1024–65535 的整数。');
     if (!REPOSITORIES.has(imageRepository)) throw new Error('只能使用 DBX 官方 Docker 镜像仓库。');
     const releaseAddress = new URL(releaseUrl);
@@ -223,7 +223,6 @@ export class DockerRuntime {
     };
   }
   async #pull(release, progress=()=>{}) {
-    progress('download',`正在下载官方 DBX v${release.version} 镜像…`);
     let pending='';
     const onOutput=chunk=>{
       pending=(pending+chunk).slice(-16384);const lines=pending.split(/[\r\n]/);pending=lines.pop();
@@ -235,11 +234,22 @@ export class DockerRuntime {
         progress('download',`官方 DBX v${release.version} · ${label}${bytes?` ${bytes[1]} / ${bytes[2]}`:''}`);
       }
     };
-    await this.#must(['pull', release.image], 'PULL_FAILED', '无法拉取 DBX 官方镜像，现有容器和数据保持原状。', 10 * 60_000, {onOutput});
-    const result = await this.#must(['image', 'inspect', release.image], 'IMAGE_INSPECT', '无法验证刚拉取的 DBX 官方镜像。');
+    const repositories=[this.#repository,...[...REPOSITORIES].filter(value=>value!==this.#repository)],failures=[];
+    let repository,image;
+    for(const candidate of repositories){
+      image=`${candidate}:${release.version}`;pending='';
+      progress('download',`正在从 ${candidate} 下载官方 DBX v${release.version}${failures.length?'（上一来源失败，已自动切换）':''}…`);
+      const pulled=await this.#command(['pull',image],10*60_000,{onOutput});
+      if(pulled.code===0){repository=candidate;break;}
+      const detail=String(pulled.stderr??'');
+      const reason=/\b403\b/.test(detail)?'访问被拒绝（403）':/\b429\b/.test(detail)?'请求限流（429）':/timeout|timed out/i.test(detail)?'连接超时':/manifest unknown|not found/i.test(detail)?'版本镜像不存在':'下载失败';
+      failures.push(`${candidate}：${reason}`);
+    }
+    if(!repository)throw new RuntimeError('PULL_FAILED',`官方镜像来源均无法下载：${failures.join('；')}。请检查网络或 Docker 镜像加速配置；现有容器和数据保持原状。`);
+    const result = await this.#must(['image', 'inspect', image], 'IMAGE_INSPECT', '无法验证刚拉取的 DBX 官方镜像。');
     let id; try { id = JSON.parse(result)[0].Id; } catch { /* Validated below. */ }
     if (!IMAGE_ID.test(id)) throw new RuntimeError('IMAGE_INSPECT', 'DBX 镜像标识无效。');
-    return id;
+    return {id,repository};
   }
   async #launch(image, version, repository = this.#repository, progress=()=>{}) {
     progress('start',`正在启动本地 DBX v${version}…`);
@@ -272,7 +282,7 @@ export class DockerRuntime {
       if(!allowDownload)throw new RuntimeError('SETUP_REQUIRED','DBX 尚未完成安装准备，请在插件仓库运行 npm run setup:dbx（首次安装使用 npm run install:dbx）。侧栏不会下载镜像。');
       progress('release','正在确认官方 DBX 稳定版本…');
       const release = await this.latest(), image = await this.#pull(release,progress);
-      const result=this.#result('ready', await this.#launch(image, release.version,this.#repository,progress), { latestVersion: release.version });
+      const result=this.#result('ready', await this.#launch(image.id, release.version,image.repository,progress), { latestVersion: release.version });
       progress('ready',`DBX v${release.version} 已准备就绪`);return result;
     } catch (error) { return this.#error(error); }
     finally { await unlock?.(); }
@@ -295,7 +305,7 @@ export class DockerRuntime {
       unlock = await this.#lock(); await this.#daemon(); previous = await this.#inspect();
       progress('release','正在确认官方 DBX 稳定版本…');
       release = await this.latest();
-      if (!previous) return this.#result('ready', await this.#launch(await this.#pull(release,progress), release.version,this.#repository,progress), { latestVersion: release.version });
+      if (!previous) { const image=await this.#pull(release,progress);return this.#result('ready',await this.#launch(image.id,release.version,image.repository,progress),{latestVersion:release.version}); }
       if (compareVersions(release.version, previous.version) <= 0) return { ...await this.#startExisting(previous,progress), latestVersion: release.version };
       const image = await this.#pull(release,progress);
       const checked = await this.#inspect();
@@ -310,7 +320,7 @@ export class DockerRuntime {
       await cp(join(this.#home, 'data'), join(backupPath, 'data'), { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true });
       await writeFile(join(backupPath, 'backup.json'), JSON.stringify({ fromVersion: previous.version, toVersion: release.version, imageId: previous.Image, createdAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
       await this.#stopAndRemove(previous); removed = true;
-      const current = await this.#launch(image, release.version,this.#repository,progress);
+      const current = await this.#launch(image.id, release.version,image.repository,progress);
       progress('ready',`DBX v${release.version} 已准备就绪`);
       return this.#result('ready', current, { latestVersion: release.version, backupPath });
     } catch (error) {
