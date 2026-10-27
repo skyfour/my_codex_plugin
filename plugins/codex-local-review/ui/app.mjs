@@ -221,8 +221,8 @@ async function init(){try{const data=await rpc('ui/initialize',{appInfo:{name:'c
 
 matchMedia('(max-width:1000px)').addEventListener('change',e=>{if(layoutChosen)return;layout=e.matches?'unified':'split';if(file&&!file.binary)renderCode();});
 
-const copyCommitKeyword=copyTextButton(()=>$('commitKeywordText').textContent,'复制 TAPD 关键字');copyCommitKeyword.id='copyCommitKeyword';$('applyCommitKeyword').before(copyCommitKeyword);
-const copyCommitMessage=copyTextButton(()=>$('commitMessage').textContent,'复制完整提交信息');copyCommitMessage.id='copyCommitMessage';const commitMessageHeading=el('div','','commit-message-heading');commitMessageHeading.append(el('span','完整提交信息'),copyCommitMessage);$('commitMessage').before(commitMessageHeading);
+const copyCommitKeyword=copyTextButton(()=>$('commitKeywordText').textContent,'复制 TAPD 关键字',{menuItem:true});copyCommitKeyword.id='copyCommitKeyword';
+const copyCommitMessage=copyTextButton(()=>$('commitMessage').textContent,'复制完整提交信息',{menuItem:true});copyCommitMessage.id='copyCommitMessage';$('refreshCommit').before(copyTextMenu([copyCommitKeyword,copyCommitMessage],'复制任务或提交内容'));const commitMessageHeading=el('div','完整提交信息','commit-message-heading');$('commitMessage').before(commitMessageHeading);
 let commitDraft=null,keywordLoading=false,keywordError='',keywordSequence=0,composerSequence=0,taskList=null,taskNotice='',committing=false,composerLoading=false;const commitTextDrafts=new Map(),keywordMemory=new Map();
 function updateComposerActions(){
  const visible=liveGit();$('commitWorkspace').hidden=!visible;reviewSurface.topInset();if(!visible)return;

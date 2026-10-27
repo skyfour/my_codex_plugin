@@ -35,16 +35,36 @@ async function writeClipboardText(text){
  try{(active?.closest('dialog[open]')??document.body).append(field);field.focus({preventScroll:true});field.select();if(document.execCommand?.('copy')!==true)throw Error('无法访问剪贴板');}
  finally{field.remove();if(active?.isConnected)active.focus({preventScroll:true});if(selection){selection.removeAllRanges();for(const range of ranges)selection.addRange(range);}if(inputSelection&&active?.isConnected)active.setSelectionRange(inputSelection.start,inputSelection.end,inputSelection.direction);for(const [node,[left,top]] of scrolls){node.scrollLeft=left;node.scrollTop=top;}window.scrollTo(position.x,position.y);}
 }
-function copyTextButton(value,label){
+function copyTextButton(value,label,{menuItem=false}={}){
  let copying=false,timer;
- const b=iconTool(button(label,async()=>{
-  if(copying)return;copying=true;clearTimeout(timer);delete b.dataset.copyState;iconTool(b,'copy',label);b.setAttribute('aria-busy','true');
-  try{const text=typeof value==='function'?value():value;if(typeof text!=='string'||!text)throw Error('没有可复制的文本');await writeClipboardText(text);b.dataset.copyState='success';iconTool(b,'copied',label+' · 已复制');status('已复制'+label.replace(/^复制/,''));}
+ const paint=(icon,hint)=>{if(menuItem){b.textContent=label.replace(/^复制/,'');b.title=hint;}else iconTool(b,icon,hint);};
+ const b=button(label,async()=>{
+  if(copying)return;copying=true;clearTimeout(timer);delete b.dataset.copyState;paint('copy',label);b.setAttribute('aria-busy','true');
+  try{const text=typeof value==='function'?value():value;if(typeof text!=='string'||!text)throw Error('没有可复制的文本');await writeClipboardText(text);b.dataset.copyState='success';paint('copied',label+' · 已复制');status('已复制'+label.replace(/^复制/,''));}
   catch{b.dataset.copyState='error';b.title=label+' · 复制失败，请手动复制';status('复制失败：无法访问剪贴板，请手动选择文本后复制',true);}
-  finally{copying=false;b.removeAttribute('aria-busy');timer=setTimeout(()=>{delete b.dataset.copyState;iconTool(b,'copy',label);},2000);}
- }),'copy',label);
- b.classList.add('copy-text-button');b.dataset.copyText='';b.setAttribute('aria-label',label);b.onpointerdown=event=>{if(event.button===0)event.preventDefault();};return b;
+  finally{copying=false;b.removeAttribute('aria-busy');timer=setTimeout(()=>{delete b.dataset.copyState;paint('copy',label);},2000);}
+ });
+ paint('copy',label);b.classList.add('copy-text-button');b.dataset.copyText='';b.setAttribute('aria-label',label);b.onpointerdown=event=>{if(event.button===0)event.preventDefault();};
+ if(menuItem){b.setAttribute('role','menuitem');b.tabIndex=-1;}return b;
 }
+let copyMenuSequence=0;
+function copyTextMenu(items,label){
+ const control=el('span',undefined,'copy-control'),trigger=iconTool(button('复制',()=>{}),'copy',label),menu=el('div',undefined,'copy-menu');
+ trigger.classList.remove('icon-button');trigger.classList.add('copy-menu-trigger');trigger.querySelector('span').classList.remove('sr-only');trigger.append(el('span','▾','copy-menu-arrow'));trigger.dataset.copyMenuTrigger='';trigger.setAttribute('aria-label',label);trigger.setAttribute('aria-haspopup','menu');trigger.setAttribute('aria-expanded','false');
+ menu.id='copy-menu-'+(++copyMenuSequence);menu.popover='auto';menu.setAttribute('role','menu');menu.setAttribute('aria-label',label);trigger.setAttribute('aria-controls',menu.id);menu.append(...items);
+ const choices=()=>items.filter(item=>!item.disabled&&!item.hidden);
+ const open=keyboard=>{menu.showPopover();const anchor=trigger.getBoundingClientRect(),height=menu.offsetHeight;menu.style.left=Math.max(8,Math.min(anchor.left,innerWidth-menu.offsetWidth-8))+'px';menu.style.top=(anchor.bottom+height+4>innerHeight-8?Math.max(8,anchor.top-height-4):anchor.bottom+4)+'px';if(keyboard)choices()[0]?.focus({preventScroll:true});};
+ trigger.onpointerdown=event=>{if(event.button===0)event.preventDefault();};trigger.onclick=event=>{if(menu.matches(':popover-open'))menu.hidePopover();else open(event.detail===0);};
+ trigger.onkeydown=event=>{if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();open(true);if(event.key==='ArrowUp')choices().at(-1)?.focus({preventScroll:true});}};
+ menu.addEventListener('beforetoggle',event=>trigger.setAttribute('aria-expanded',String(event.newState==='open')));
+ menu.onkeydown=event=>{event.stopPropagation();const enabled=choices(),index=enabled.indexOf(document.activeElement);let next;if(event.key==='ArrowDown')next=(index+1)%enabled.length;else if(event.key==='ArrowUp')next=(index-1+enabled.length)%enabled.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=enabled.length-1;else if(event.key==='Tab'){menu.hidePopover();trigger.focus({preventScroll:true});return;}else return;event.preventDefault();enabled[next]?.focus({preventScroll:true});};
+ for(const item of items)item.addEventListener('click',()=>{if(menu.matches(':popover-open')){const keyboard=menu.contains(document.activeElement);menu.hidePopover();if(keyboard)trigger.focus({preventScroll:true});}});
+ control.append(trigger,menu);return control;
+}
+function closeCopyMenus(){for(const menu of document.querySelectorAll('.copy-menu:popover-open'))menu.hidePopover();}
+window.addEventListener('resize',closeCopyMenus);
+document.addEventListener('scroll',event=>{if(!event.target.closest?.('.copy-menu'))closeCopyMenus();},true);
+document.addEventListener('keydown',event=>{const menu=document.querySelector('.copy-menu:popover-open');if(event.key==='Escape'&&menu){event.preventDefault();event.stopImmediatePropagation();const keyboard=menu.contains(document.activeElement),trigger=menu.parentElement.querySelector('[data-copy-menu-trigger]');menu.hidePopover();if(keyboard)trigger.focus({preventScroll:true});}},true);
 for(const [id,icon,hint] of [
  ['openProject','folder','打开项目（⌘O）'],['addProject','plus','打开另一个项目'],
  ['projectMenu','sidebar','显示或隐藏项目管理'],['quickOpen','switch','切换项目（⌘P）'],
@@ -53,8 +73,7 @@ for(const [id,icon,hint] of [
  ['gitFetch','fetch','Fetch · 获取远程引用，不合并工作区'],['gitPull','pull','Pull · 从当前跟踪分支拉取，仅快进'],['gitPush','push','Push · 推送当前分支'],
  ['refreshCommit','refresh','刷新暂存区 · 刷新分支和已暂存文件'],['saveReview','snapshot','保存审查快照'],['liveView','back','返回工作区'],['export','export','导出审查记录'],
  ['prevFile','up','上一个文件（Alt+↑ / K）'],['nextFile','down','下一个文件（Alt+↓ / J）'],
- ['splitView','split','并排显示修改前后的代码'],['unifiedView','unified','统一显示代码差异'],
- ['stageFile','stage','Stage · 暂存这个文件的当前磁盘内容'],['unstageFile','unstage','Unstage · 取消暂存，保留磁盘修改'],['stageReviewedFile','reviewed','核对审阅快照后暂存此文件']
+ ['splitView','split','并排显示修改前后的代码'],['unifiedView','unified','统一显示代码差异']
 ])iconTool(document.getElementById(id),icon,hint);
 // Its existing label and two SVG states are updated by the fullscreen controller.
 const fullscreenTool=document.getElementById('reviewFullscreen');fullscreenTool.classList.add('icon-button');fullscreenTool.querySelector('span').classList.add('sr-only');
