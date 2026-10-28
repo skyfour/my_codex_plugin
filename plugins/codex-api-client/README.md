@@ -65,7 +65,7 @@ JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；
 
 ## 常见问题
 
-**新电脑如何继续使用原有请求？** 在旧电脑点击「导出全部」，在新电脑安装插件后导入备份。普通导出不迁移敏感值、Cookie 和附件；需要全部迁移时使用「完整备份与恢复」，密码加密归档包含这些内容；详细范围见[整体导入与导出](#整体导入与导出)。
+**新电脑如何继续使用原有请求？** 在旧电脑点击「导出全部」，在新电脑安装插件后导入备份。普通导出不迁移敏感值、Cookie 和附件；需要全部迁移时使用「完整备份与恢复」，密码加密归档包含这些内容；详细范围见[密码加密完整备份](#密码加密完整备份)。
 
 **界面更新了，安装后仍是旧版？** 先确认安装脚本完成构建，再重新打开 Codex 并新建聊天。开发预览也需先运行 `npm run build`。
 
@@ -78,6 +78,8 @@ JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；
 在插件目录执行 `npm ci`、`npm run build`、`npm test`、`npm run check`。`npm run dev` 在 `127.0.0.1:47890` 提供独立预览。浏览器验证使用 `npm exec playwright -- test --config playwright.tree.config.ts`，需要 Chrome。
 
 完整界面与易用性回归使用 `npm exec playwright -- test --config playwright.usability.config.ts`；先执行 `npm run build`，确保预览加载最新界面。
+
+开发参考：[MCP 操作约定](skills/api-client/SKILL.md)、[本地功能设计记录](../../docs/superpowers/specs/2026-10-28-api-client-local-design.md)、[实施计划记录](../../docs/superpowers/plans/2026-10-28-api-client-local.md)。设计与计划保留开发阶段的约束，当前使用范围以本文为准。
 
 ## 兼容模式与规范导入
 
@@ -104,7 +106,7 @@ OAuth2 的“开始 OAuth 授权”是唯一打开系统浏览器的操作。授
 
 `api_oauth_start({flow,authorizationUrl?,tokenUrl,clientId,clientSecret?,scope?,target:{kind,id,key}})`、`api_oauth_poll({sessionId})`、`api_oauth_cancel({sessionId})`、`api_oauth_refresh({target})` 均仅对 App 可见。`target.kind` 为 `environment` 或 `globals`（UI 选择环境）；结果只含会话状态、目标和过期时间等脱敏元信息。客户端凭据与刷新操作立即返回 pending 会话 ID，界面通过 poll 获取完成状态，交换期间可取消；离开认证面板也会取消。最多 4 个活动 OAuth 会话，完成结果保留 5 分钟，最多 100 条。
 
-请求“网络”面板可覆盖超时、TLS 校验、重定向、代理和上传 CA/客户端证书；省略字段继承全局，保存在请求 item 的 `x-codex-api-client.network`。`proxy:null` 表示直接连接，不回退系统环境变量代理。全局设置支持 `proxyCredentials:[{key:"username",value,type:"secret"},{key:"password",value,type:"secret"}]` 及 `noProxy` 原生 URL 匹配规则（如 `http+https://localhost:*/*`）。凭据和绕过规则由 Postman SDK 处理。请求 CA/证书路径纳入加密备份附件访客并在恢复时重映射，文件访问仍受显式许可/上传附件限制。HTTP 集合逐项重置网络设置，后续请求不继承前一请求的覆盖。
+请求“网络”面板可覆盖超时、TLS 校验、重定向、代理和上传 CA/客户端证书；省略字段继承全局，保存在请求 item 的 `x-codex-api-client.network`。`proxy:null` 表示直接连接，不回退系统环境变量代理。全局设置支持 `proxyCredentials:[{key:"username",value,type:"secret"},{key:"password",value,type:"secret"}]` 及 `noProxy` 原生 URL 匹配规则（如 `http+https://localhost:*/*`）。凭据和绕过规则由 Postman SDK 处理。请求 CA/证书路径纳入加密备份附件清单并在恢复时重映射，文件访问仍受显式许可/上传附件限制。HTTP 集合逐项重置网络设置，后续请求不继承前一请求的覆盖。
 
 ### SSE / WebSocket / Socket.IO 交互调试
 

@@ -2,7 +2,7 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js';
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {SSEClientTransport} from '@modelcontextprotocol/sdk/client/sse.js';
 export function mcpAdapter(c,h){
- const client=new Client({name:'Codex API Client debugger',version:'0.2.1'}),pending=new Set();let stopped=false,closing;
+ const client=new Client({name:'Codex API Client debugger',version:'0.3.0'}),pending=new Set();let stopped=false,closing;
  // Keep redirects and legacy SSE POST endpoints on the explicitly selected origin.
  const origin=new URL(c.url).origin;
  const boundedFetch=async(url,init={})=>{

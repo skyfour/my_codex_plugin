@@ -9,7 +9,7 @@
 | 插件 | 适合做什么 | 插件版本 | 使用与限制 |
 | --- | --- | --- | --- |
 | **任务看板** | 从 TAPD 选择导入任务，安排泳道进度，关联 Codex 会话 | 0.4.7 | [任务看板说明](plugins/codex-task-panel/README.md) |
-| **API 调试台** | 管理请求、集合与环境，执行脚本与断言，导入／导出工作区 | 0.2.1 | [API 调试台说明](plugins/codex-api-client/README.md) |
+| **API 调试台** | 多协议本地调试、Postman 脚本、规范导入与加密工作区迁移 | 0.3.0 | [API 调试台说明](plugins/codex-api-client/README.md) |
 | **本地代码审查** | 浏览 Git 差异与历史，添加批注，暂存、提交和同步分支 | 0.5.13 | [代码审查说明](plugins/codex-local-review/README.md) |
 | **DBX 数据库工作台** | 在侧栏使用完整官方 Docker Web，管理连接、查询数据库 | 0.6.42 | [DBX 说明](plugins/dbx/README.md) |
 
@@ -118,7 +118,7 @@ node scripts/install.mjs --plugin codex-task-panel --plugin codex-local-review
 | 插件 | 新电脑如何继续使用 |
 | --- | --- |
 | 任务看板 | 重新配置 TAPD 并导入所需任务；本地泳道和 Codex 会话关联各设备独立 |
-| API 调试台 | 在旧电脑「导出全部」，新电脑导入备份；敏感值、Cookie 与本机附件需重新配置，见[迁移范围](plugins/codex-api-client/README.md#整体导入与导出) |
+| API 调试台 | 使用「完整备份与恢复」密码加密迁移凭据、Cookie、设置与引用附件；普通「导出全部」仍排除这些内容，见[完整备份](plugins/codex-api-client/README.md#密码加密完整备份) |
 | 本地代码审查 | Git 项目照常克隆；审查记录与批注在本机目录，可导出 Markdown／JSON 供查看 |
 | DBX | 使用独立 Docker 数据目录；原生 0.6.39 的旧目录不会自动迁移，见[DBX 数据说明](plugins/dbx/README.md#数据与旧版迁移) |
 
