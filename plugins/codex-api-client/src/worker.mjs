@@ -1,6 +1,7 @@
 import {materializeNetwork,networkOf,authProblem,validateOptions} from './auth.mjs';
 import {compatibilityMode,findItem,selectCollection} from './collections.mjs';
 import runtime from 'postman-runtime';
+import {javascriptLanguage} from '@codemirror/lang-javascript';
 import sdk from 'postman-collection';
 import request from 'postman-request';
 import { createRequire } from 'node:module';
@@ -17,7 +18,7 @@ process.once('message', input => {
   try { run(input); } catch (error) { send('error', errorJSON(error)); send('done',{status:'failed'}); }
 });
 
-function run({ collection, environment = {}, globals = {}, cookies, data = [], options = {}, secretKeys = {}, workspace = [] }) {
+function run({ collection, environment = {}, globals = {}, cookies, data = [], options = {}, secretKeys = {}, collectionSecretKeys = {}, workspace = [] }) {
   collection.info={...collection.info,_postman_id:collection.info?._postman_id||randomUUID()};
   workspace=workspace.map(v=>({...v,info:{...v.info,_postman_id:v.info?._postman_id||randomUUID()}}));
   const prepareScopes=input=>{
@@ -75,10 +76,31 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
     reportError(error, cursor, item);
     for (const r of results || []) {
       reportError(r.error, cursor, item);
-      const values=[];
-      for(const [scope,keys]of Object.entries(secretKeys))for(const key of keys){const value=r.result?.[scope]?.get?.(key);if(value!==undefined)values.push(String(value));}
-      if(values.length)send('secrets',values);
     }
+  };
+  const preparedScripts=new WeakSet();
+  const prepareScript=script=>{
+    if(preparedScripts.has(script))return;
+    const source=script.toSource()||'';
+    let offset=0;
+    // Keep directive prologues (including strict mode) and hashbangs intact.
+    for(let node=javascriptLanguage.parser.parse(source).topNode.firstChild;node;node=node.nextSibling){
+      if(['LineComment','BlockComment','Hashbang'].includes(node.name)){offset=node.to;continue;}
+      if(node.name!=='ExpressionStatement'||node.firstChild?.name!=='String')break;
+      offset=node.to;
+    }
+    const prelude=';[pm.environment,pm.globals,pm.collectionVariables].forEach(scope=>{scope.mutations.autoCompact=false;});';
+    script.exec=[source.slice(0,offset)+'\n'+prelude+'\n'+source.slice(offset)];
+    preparedScripts.add(script);
+  };
+  const sensitiveCollectionKeys=new Set(secretKeys.collectionVariables||[]);
+  const captureSecrets=result=>{
+    const values=[];
+    for(const [scope,keys]of Object.entries({...secretKeys,collectionVariables:[...sensitiveCollectionKeys]})){
+      for(const key of keys){const value=result?.[scope]?.get?.(key);if(value!==undefined)values.push(String(value));}
+      result?.[scope]?.mutations?.applyOn({applyMutation(operation,key,value){if(keys.includes(key)&&value!==undefined)values.push(String(value));}});
+    }
+    if(values.length)send('secrets',values);
   };
   const proxiesFor=o=>new sdk.ProxyConfigList({},o.proxy?[{match:'http+https://*:*/*',host:new URL(o.proxy).hostname,port:Number(new URL(o.proxy).port)||80,protocol:'http',tunnel:true,authenticate:!!(o.proxyUsername||o.proxyPassword),username:o.proxyUsername,password:o.proxyPassword,bypass:o.noProxy||[]}]:[]);
   let nestedCalls=0;
@@ -119,6 +141,8 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
   const nativeRun=runtime.Runner.prototype.run;
   runtime.Runner.prototype.run=function(source,runOptions,callback){
     const raw=source.toJSON(),original=[home,...workspace].find(v=>v.info._postman_id===raw.info._postman_id)||raw;
+    // Native nested scopes propagate mutations back; retain sensitivity from every executed collection.
+    for(const key of collectionSecretKeys[original.info._postman_id]||[])sensitiveCollectionKeys.add(key);
     return nativeRun.call(this,source,{...runOptions,script:{...runOptions.script,requestResolver:resolverFor(original)},requester:{...runOptions.requester}},(error,active)=>{
       if(error)return callback(error);
       active.options={...active.options};
@@ -126,6 +150,17 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
       const nativeStart=active.start;
       active.start=function(callbacks){
         return nativeStart.call(this,{...callbacks,
+          beforeScript(error,cursor,script,...rest){
+            prepareScript(script);
+            send('scriptStart',{id:script._lastExecutionId});
+            callbacks.beforeScript?.(error,cursor,script,...rest);
+          },
+          script(error,cursor,result,script,...rest){
+            captureSecrets(result);
+            // Missing scope snapshots cannot certify that dynamic values were captured.
+            if(result?.collectionVariables&&result?.environment&&result?.globals)send('scriptEnd',{id:script._lastExecutionId});
+            callbacks.script?.(error,cursor,result,script,...rest);
+          },
           item(error,cursor,item,visualizer,...rest){
             if(visualizer?.error)reportError(visualizer.error,cursor,item);
             if(visualizer?.processedTemplate)send('visualizer',{itemId:item.id,html:visualizer.processedTemplate});
@@ -180,7 +215,7 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
         reportError(error);
         send('done',{
           status:hasErrors?'failed':'completed',environment:env.toJSON(),globals:globalScope.toJSON(),
-          collectionVariables:c.variables.toJSON(), cookies:jar.serializeSync(),
+          collectionVariables:c.variables.toJSON().map(v=>sensitiveCollectionKeys.has(v.key)?{...v,type:'secret'}:v), cookies:jar.serializeSync(),
         });
       },
     });

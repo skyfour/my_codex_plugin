@@ -260,11 +260,12 @@ export class ApiService {
     for(const d of [...workspace,collectionDoc,environmentDoc,globalsDoc,cookiesDoc,settingsDoc])if(d)await transformSecrets(d.data,v=>{secretValues.push(v.value);return v;});
     // Scripts receive the actual values, without implementation-specific Keychain references.
     const secretKeys={environment:[],globals:[],collectionVariables:[]};
+    const collectionSecretKeys=Object.fromEntries(workspace.map(d=>[d.id,(d.data.variable||[]).filter(isSecret).map(v=>v.key)]));
     for(const [doc,scope]of [[environmentDoc,'environment'],[globalsDoc,'globals'],[collectionDoc,'collectionVariables']])if(doc)await transformSecrets(doc.data,v=>{secretKeys[scope].push(v.key);return v;});
     const resolved=async d=>transformSecrets(d||{},v=>{delete v.secretRef;v.type='string';delete v.sensitive;return v;});
     // Runtime-only identity uses document IDs: restored copies may share Postman collection IDs.
     collection.info._postman_id=collectionId;
-    const input={workspace:await Promise.all(workspace.map(d=>resolved({...d.data,info:{...d.data.info,_postman_id:d.id}}))),collection:await resolved(collection),environment:await resolved(environmentDoc?.data),globals:await resolved(globalsDoc?.data),cookies:await resolved(cookiesDoc?.data),data,options:materializeNetwork(options),secretKeys};
+    const input={workspace:await Promise.all(workspace.map(d=>resolved({...d.data,info:{...d.data.info,_postman_id:d.id}}))),collection:await resolved(collection),environment:await resolved(environmentDoc?.data),globals:await resolved(globalsDoc?.data),cookies:await resolved(cookiesDoc?.data),data,options:materializeNetwork(options),secretKeys,collectionSecretKeys};
     const run={id:randomUUID(),status:'running',name:collection.info.name,collectionId,itemId,environmentId,createdAt:new Date().toISOString(),responses:[],assertions:[],logs:[],errors:[],variableChanges:[]};
     const controller=new AbortController();this.store.saveRun(run);
     const cancellationPoll=setInterval(()=>{if(this.store.isCancelled(run.id))controller.abort();},200);
@@ -277,6 +278,8 @@ export class ApiService {
       // Persist only progress until all script variable changes have been collected.
       this.store.saveRun({...run,responses:[],assertions:[],logs:[],errors:[],progress:{completedRequests:run.responses.length}});
     }}).then(async result=>{
+      // Final worker output owns execution errors; retain only newly produced persistence errors below.
+      run.errors=[];
       const additional=[];
       try {
         await this.persistScope('environment',environmentId,environmentDoc,result.environment?.values,run,additional);

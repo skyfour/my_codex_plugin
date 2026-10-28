@@ -10,14 +10,23 @@ export function executeCollection(input, { signal, onEvent = () => {} } = {}) {
       stdio: ['ignore','ignore','pipe','ipc'],
     });
     let done = false, totalBytes = 0;
+    const pendingScripts=new Set();
+    let terminalReason='';
     const finish = extra => {
       if (done) return; done = true;
       clearTimeout(timer); signal?.removeEventListener('abort', cancel);
-      Object.assign(result, extra); child.once('close',()=>resolve(result)); child.kill('SIGKILL');
+      Object.assign(result, extra);
+      if(pendingScripts.size){
+        // Incomplete scripts may have printed newly assigned secrets before a scope snapshot.
+        result.responses=[];result.assertions=[];result.logs=[];
+        result.errors=[{message:terminalReason+'SCRIPT_OUTPUT_HIDDEN: 脚本未完成敏感变量捕获，本次响应、断言、日志及原始错误已隐藏'}];
+        delete result.environment;delete result.globals;delete result.collectionVariables;delete result.cookies;
+      }
+      child.once('close',()=>resolve(result)); child.kill('SIGKILL');
     };
     const cancel = () => finish({ status: 'cancelled' });
     const timer = setTimeout(() => {
-      result.errors.push({ message: 'RUN_TIMEOUT: 运行超过最大时长' }); finish({ status:'failed' });
+      terminalReason='RUN_TIMEOUT: ';result.errors.push({ message: 'RUN_TIMEOUT: 运行超过最大时长' }); finish({ status:'failed' });
     }, input.options?.runTimeout ?? 120000);
     signal?.addEventListener('abort', cancel, { once:true });
     child.stderr.on('data', () => {}); // Never forward worker diagnostics containing user scripts or credentials.
@@ -29,6 +38,8 @@ export function executeCollection(input, { signal, onEvent = () => {} } = {}) {
       if (totalBytes > 50 * 1024 * 1024 || result.responses.length + result.logs.length + result.assertions.length > 10000) {
         result.errors.push({message:'RUN_LIMIT: 运行结果超过 50 MB 或 10000 条记录'}); return finish({status:'failed'});
       }
+      if(message.type==='scriptStart')pendingScripts.add(message.value.id);
+      if(message.type==='scriptEnd')pendingScripts.delete(message.value.id);
       if (message.type === 'done') return finish(message.value);
       if(message.type==='visualizer'){const response=result.responses.findLast(r=>r.itemId===message.value.itemId);if(response)response.visualizer=message.value.html;}
       if (message.type === 'response') result.responses.push(message.value);
