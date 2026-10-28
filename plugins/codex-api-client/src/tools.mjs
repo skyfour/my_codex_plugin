@@ -11,6 +11,10 @@ const options=z.object({
   proxy:z.string().optional(),caFile:z.string().optional(),certificates:z.array(object).optional(),allowedFiles:z.array(z.string()).optional(),
 }).strict();
 export const TOOL_DEFINITIONS = [
+  ['api_backup_start','App 专用加密备份传输。',z.object({operation:z.enum(['export','import']),password:z.string().min(1).max(1024),includeHistory:z.boolean().optional(),mode:z.enum(['merge','replace']).optional(),context:z.object({selectedEnvironment:z.string().max(200).optional(),ui:z.object({theme:z.enum(['light','dark']).optional(),sidebarOpen:z.boolean().optional(),responseTab:z.string().max(30).optional()}).strict().optional()}).strict().optional()}).strict(),'backupStart',false,'app'],
+  ['api_backup_chunk','App 专用加密归档分块。',z.object({transferId:id,offset:z.number().int().min(0).optional(),base64:z.string().max(1400000).optional()}).strict(),'backupChunk',false,'app'],
+  ['api_backup_finish','App 专用预览或确认恢复。',z.object({transferId:id,decisions:z.record(z.string(),z.enum(['local','backup'])).optional()}).strict(),'backupFinish',false,'app'],
+  ['api_backup_cancel','App 专用取消备份。',z.object({transferId:id}).strict(),'backupCancel',false,'app'],
   ['api_client_open','打开 API 调试界面并读取本地工作区。',z.object({}).strict(),'state',true],
   ['api_workspace_state','读取集合、环境、设置及历史摘要；敏感变量被隐藏。',z.object({}).strict(),'state',true],
   ['api_document_get','读取 collection/environment/globals/settings/cookies 文档和 revision。',z.object({kind,id}).strict(),'get',true],

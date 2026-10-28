@@ -21,14 +21,15 @@ export function createServer({directory=defaultDataDirectory(),secrets}={}) {
   registerAppResource(server,'Codex API Client',APP_URI,{_meta:{ui:{prefersBorder:false,csp:{connectDomains:[],resourceDomains:[]}}}},async()=>({
     contents:[{uri:APP_URI,mimeType:RESOURCE_MIME_TYPE,text:await readFile(new URL('../dist/index.html',import.meta.url),'utf8'),_meta:{ui:{prefersBorder:false,csp:{connectDomains:[],resourceDomains:[]}}}}],
   }));
-  for(const [name,description,inputSchema,,readOnly]of TOOL_DEFINITIONS) {
+  for(const [name,description,inputSchema,,readOnly,visibility]of TOOL_DEFINITIONS) {
     const config={title:name==='api_client_open'?'API 调试台':name,description,inputSchema,annotations:{readOnlyHint:readOnly,destructiveHint:name==='api_document_delete',openWorldHint:name==='api_run_start'}};
     const handler=async args=>{
       try {const value=await invoke(service,name,args);return {content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value};}
       catch(error){return {isError:true,content:[{type:'text',text:error.message}]};}
     };
-    const descriptor=name==='api_client_open'?{...config,icons:sidebarIcons,_meta:{ui:{resourceUri:APP_URI},'openai/ui':{entrypoints:[{type:'global'}]}}}:config;
-    if(name==='api_client_open')registerAppTool(server,name,descriptor,handler);
+    const privateConfig=visibility==='app'?{...config,_meta:{ui:{visibility:['app']}}}:config;
+    const descriptor=name==='api_client_open'?{...config,icons:sidebarIcons,_meta:{ui:{resourceUri:APP_URI},'openai/ui':{entrypoints:[{type:'global'}]}}}:privateConfig;
+    if(name==='api_client_open'||visibility==='app')registerAppTool(server,name,descriptor,handler);
     else server.registerTool(name,descriptor,handler);
     publishedTools.push({name,...descriptor,inputSchema:z.toJSONSchema(inputSchema,{target:'draft-7'}),execution:{taskSupport:'forbidden'}});
   }

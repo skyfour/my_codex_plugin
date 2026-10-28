@@ -32,7 +32,7 @@ export class Store {
   async put(kind,id,data,expectedRevision) {
     return (await this.putMany([{kind,id,data,expectedRevision}]))[0];
   }
-  async putMany(documents) {
+  async putMany(documents,{replace=false,history=[]}={}) {
     const created=[],pending=[],prepared=[],keys=new Set();
     try {
       for(let {kind,id,data,expectedRevision} of documents){
@@ -55,8 +55,10 @@ export class Store {
       // Prepare Keychain values first; the SQLite transaction contains only synchronous writes.
       this.db.exec('BEGIN IMMEDIATE');
       try {
+        if(replace)this.db.exec('DELETE FROM documents; DELETE FROM runs');
+        for(const run of history)this.saveRun(run);
         for(const {kind,id,data,expectedRevision} of prepared){
-          if((this.row(kind,id)?.revision??0)!==expectedRevision)throw new Error('CONFLICT: 内容已更新');
+          if(!replace&&(this.row(kind,id)?.revision??0)!==expectedRevision)throw new Error('CONFLICT: 内容已更新');
           this.db.prepare(`INSERT INTO documents VALUES(?,?,?,?,?) ON CONFLICT(kind,id)
             DO UPDATE SET revision=excluded.revision,data=excluded.data,updatedAt=excluded.updatedAt`)
             .run(kind,id,expectedRevision+1,data,new Date().toISOString());

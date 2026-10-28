@@ -15,6 +15,7 @@ test('plugin starts over stdio, exposes app and document tools, returns real per
   const tools=await client.listTools();
   assert.ok(tools.tools.some(t=>t.name==='api_client_open'&&t._meta.ui.resourceUri));
   assert.ok(tools.tools.some(t=>t.name==='api_run_start'));
+  for(const name of ['api_backup_start','api_backup_chunk','api_backup_finish','api_backup_cancel'])assert.deepEqual(tools.tools.find(t=>t.name===name)?._meta?.ui?.visibility,['app']);
   const created=await client.callTool({name:'api_document_put',arguments:{kind:'environment',id:'dev',revision:0,data:{name:'Dev',values:[{key:'baseUrl',value:'http://localhost'}]}}});
   assert.equal(created.isError,undefined);
   assert.equal(created.structuredContent.revision,1);

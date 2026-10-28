@@ -1,3 +1,5 @@
+import {BackupService} from './backup.mjs';
+import {BackupTransfer} from './backup-transfer.mjs';
 import { randomUUID } from 'node:crypto';
 import { basename, join, resolve } from 'node:path';
 import { mkdir, writeFile, readdir } from 'node:fs/promises';
@@ -5,7 +7,7 @@ import { executeCollection } from './execution.mjs';
 import { normalizeCollection, findItem, moveItem, duplicateItem, selectCollection } from './collections.mjs';
 import { importDocument, exportCurl, parseData, warningsFor } from './formats.mjs';
 import { isSecret, redact, transformSecrets } from './secrets.mjs';
-import {WORKSPACE_FORMAT,TRANSFER_LIMIT,workspacePreview,portableData,uniqueName,parseWorkspace} from './workspace-transfer.mjs';
+import {WORKSPACE_FORMAT,TRANSFER_LIMIT,workspacePreview,portableData,sanitizedPortableData,portableSettings,uniqueName,parseWorkspace} from './workspace-transfer.mjs';
 
 export const DEFAULT_SETTINGS = { requestTimeout:30000, scriptTimeout:5000, runTimeout:120000, strictSSL:true, followRedirects:true, delay:0 };
 const kinds = ['collection','environment','globals','settings','cookies'];
@@ -14,7 +16,11 @@ const summary = run => ({ id:run.id,status:run.status,name:run.name,createdAt:ru
 const json = v => JSON.stringify(v);
 
 export class ApiService {
-  constructor(store) { this.store=store; this.active=new Map(); }
+  constructor(store) { this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store)); }
+  backupStart(args){return this.backups.start(args);}
+  backupChunk(args){return this.backups.chunk(args);}
+  backupFinish(args){return this.backups.finish(args);}
+  backupCancel(args){return this.backups.cancel(args);}
   async state() {
     const [collections,environments,globals,settings,cookies]=await Promise.all(['collection','environment','globals','settings','cookies'].map(k=>this.store.list(k)));
     return {collections,environments,globals:globals[0]||null,settings:settings[0]||null,cookies:cookies[0]||null,history:this.store.listRuns().map(summary),defaults:DEFAULT_SETTINGS};
@@ -49,12 +55,13 @@ export class ApiService {
     const collections=await this.store.list('collection'),environments=await this.store.list('environment');
     const data={format:WORKSPACE_FORMAT,version:1,createdAt:new Date().toISOString(),collections:[],environments:[],globals:null};
     // Export the captured document snapshots, without resolving credentials from Keychain.
-    data.collections=await Promise.all(collections.map(c=>portableData(c.data)));
-    data.environments=await Promise.all(environments.map(e=>portableData(e.data)));
-    const globals=await this.store.get('globals','default');if(globals)data.globals=await portableData(globals.data);
+    data.collections=await Promise.all(collections.map(c=>sanitizedPortableData(c.data)));
+    data.environments=await Promise.all(environments.map(e=>sanitizedPortableData(e.data)));
+    const globals=await this.store.get('globals','default');if(globals)data.globals=await sanitizedPortableData(globals.data);
+    const settings=await this.store.get('settings','default');if(settings)data.settings=await sanitizedPortableData(portableSettings(settings.data));
     parseWorkspace(data);
     if(Buffer.byteLength(JSON.stringify(data,null,2),'utf8')>TRANSFER_LIMIT)throw new Error('EXPORT_LIMIT: 工作区备份超过 20 MB');
-    return {data,name:'api-client-workspace-'+new Date().toISOString().slice(0,10)+'.json',warnings:['已标记的敏感变量仅保留名称；本地附件、Cookie、历史和机器设置不包含在备份中。']};
+    return {data,name:'api-client-workspace-'+new Date().toISOString().slice(0,10)+'.json',warnings:['已标记的敏感变量仅保留名称；Cookie 值、历史、证书和附件文件不包含；文件需重新选择。脚本中的硬编码秘密需自行检查。']};
   }
   async importWorkspace(data) {
     const entries=[],warnings=[],collections=await this.store.list('collection'),environments=await this.store.list('environment');
@@ -77,12 +84,13 @@ export class ApiService {
       }
       if(!live||merged.values.length!==live.data.values.length)entries.push({kind:'globals',id:'default',data:merged,expectedRevision:live?.revision||0});
     }
+    if(data.settings&&!this.store.row('settings','default')){const settings=await sanitizedPortableData(portableSettings(data.settings));validateOptions({...DEFAULT_SETTINGS,...settings});entries.push({kind:'settings',id:'default',data:settings,expectedRevision:0});}
     const documents=await this.store.putMany(entries);
     return {documents,warnings:[...new Set(warnings)],...workspacePreview(data)};
   }
   async export({kind,id,format='postman',itemId}) {
     assertKind(kind);
-    const data=await this.store.export(kind,id);
+    const data=await sanitizedPortableData(await this.store.export(kind,id));
     if(format==='curl') {
       const found=findItem(data,itemId),item=found?.item; if(!item?.request) throw new Error('NOT_FOUND');
       const inherited=[data,...found.parents].map(p=>p.auth).filter(Boolean).at(-1);
@@ -207,7 +215,7 @@ export class ApiService {
     if(own){own.controller.abort();await own.completion;}
     return this.result({runId});
   }
-  async close() { for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
+  async close() { this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
 }
 function sanitize(value,secrets) {
   const encoded=[];
