@@ -1,4 +1,4 @@
 syntax = "proto3";
 package fixture;
 message Msg { string text = 1; }
-service Echo { rpc Unary(Msg) returns (Msg); }
+service Echo { rpc Unary(Msg) returns (Msg); rpc Download(Msg) returns(stream Msg); }

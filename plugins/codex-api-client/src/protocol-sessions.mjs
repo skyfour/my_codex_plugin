@@ -7,10 +7,10 @@ export class ProtocolSessions {
  connect(config){
   if(this.closed)throw Error('PROTOCOL_CLOSED');
   const adapter=this.adapters[config.type];if(!adapter)throw Error('PROTOCOL_UNSUPPORTED');
-  if([...this.sessions.values()].filter(s=>!['closed','failed'].includes(s.state)).length>=PROTOCOL_LIMITS.sessions)throw Error('PROTOCOL_LIMIT: 同时最多 4 个会话');
-  while(this.sessions.size>=PROTOCOL_LIMITS.retained){const old=[...this.sessions.values()].find(s=>['closed','failed'].includes(s.state));if(!old)break;this.sessions.delete(old.id);}
+  if([...this.sessions.values()].filter(s=>s.cleanupPending||!['closed','failed'].includes(s.state)).length>=PROTOCOL_LIMITS.sessions)throw Error('PROTOCOL_LIMIT: 同时最多 4 个会话');
+  while(this.sessions.size>=PROTOCOL_LIMITS.retained){const old=[...this.sessions.values()].find(s=>!s.cleanupPending&&['closed','failed'].includes(s.state));if(!old)break;this.sessions.delete(old.id);}
   const s={id:randomUUID(),state:'connecting',seq:0,events:[],bytes:0,controller:new AbortController(),secrets:config.secrets||[],adapter:null};this.sessions.set(s.id,s);
-  const state=value=>{if(['closed','failed'].includes(s.state))return;s.state=value;this.emit(s,'state',value);if(['closed','failed'].includes(value)){clearTimeout(s.timer);s.controller.abort();s.adapter?.close();}};
+  const state=value=>{if(['closed','failed'].includes(s.state))return;s.state=value;this.emit(s,'state',value);if(['closed','failed'].includes(value)){clearTimeout(s.timer);s.controller.abort();const cleanup=s.adapter?.close();if(cleanup?.then){s.cleanupPending=true;s.cleanup=Promise.resolve(cleanup).catch(()=>{}).finally(()=>{s.cleanupPending=false;});}}};
   const fail=code=>{this.emit(s,'error',code);state('failed');};
   this.emit(s,'state','connecting');
   s.timer=setTimeout(()=>fail('PROTOCOL_CONNECT_TIMEOUT'),config.connectTimeout||30000);s.timer.unref?.();
@@ -34,6 +34,6 @@ export class ProtocolSessions {
  own(id){const s=this.sessions.get(id);if(!s)throw Error('NOT_FOUND: 协议会话不存在');return s;}
  async action({sessionId,action,payload}){const s=this.own(sessionId);if(s.state!=='open')throw Error('PROTOCOL_NOT_OPEN');if(Buffer.byteLength(JSON.stringify(payload)??'null')>PROTOCOL_LIMITS.eventBytes)throw Error('PROTOCOL_ACTION_LIMIT');try{await s.adapter.action(action,payload);return {sessionId,state:s.state};}catch(error){if(/^PROTOCOL_/.test(error.message))throw error;throw Error('PROTOCOL_ACTION_FAILED');}}
  events({sessionId,after=0,limit=100}){if(!Number.isInteger(after)||after<0||!Number.isInteger(limit)||limit<1||limit>1000)throw Error('PROTOCOL_CURSOR_INVALID');const s=this.own(sessionId),first=s.events[0]?.event.seq||s.seq+1;const events=s.events.filter(v=>v.event.seq>after).slice(0,limit).map(v=>v.event);return {sessionId,state:s.state,events,cursor:events.at(-1)?.seq??after,firstSeq:first,gap:after<first-1};}
- async disconnect({sessionId}){const s=this.own(sessionId);if(!['closed','failed'].includes(s.state)){s.state='closing';this.emit(s,'state','closing');clearTimeout(s.timer);s.controller.abort();await s.adapter?.close();s.state='closed';this.emit(s,'state','closed');}return {sessionId,state:s.state};}
+ async disconnect({sessionId}){const s=this.own(sessionId);if(!['closed','failed'].includes(s.state)){s.state='closing';this.emit(s,'state','closing');clearTimeout(s.timer);s.controller.abort();await s.adapter?.close();s.state='closed';this.emit(s,'state','closed');}await s.cleanup;return {sessionId,state:s.state};}
  async close(){this.closed=true;await Promise.all([...this.sessions.values()].map(s=>this.disconnect({sessionId:s.id})));}
 }
