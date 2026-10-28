@@ -16,30 +16,33 @@
     "install:local": "node scripts/install-local.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/ext-apps": "^1.0.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "postman-runtime": "^7.0.0",
-    "postman-collection": "^5.0.0",
-    "postman-request": "^2.88.1-postman.0",
-    "csv-parse": "^6.0.0",
-    "shell-quote": "^1.8.0",
-    "zod": "^4.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "codemirror": "^6.0.0",
+    "@codemirror/autocomplete": "6.20.4",
     "@codemirror/lang-javascript": "^6.0.0",
     "@codemirror/lang-json": "^6.0.0",
     "@codemirror/theme-one-dark": "^6.0.0",
+    "@modelcontextprotocol/ext-apps": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "codemirror": "^6.0.0",
+    "csv-parse": "^6.0.0",
     "openapi-to-postmanv2": "6.4.2",
+    "postman-collection": "^5.0.0",
+    "postman-request": "^2.88.1-postman.0",
+    "postman-runtime": "^7.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "shell-quote": "^1.8.0",
+    "socket.io-client": "^4.8.4",
+    "ws": "^8.22.0",
     "yaml": "2.9.1",
-    "@codemirror/autocomplete": "6.20.4"
+    "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.50.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "socket.io": "^4.8.4",
     "typescript": "^5.0.0",
     "vite": "^6.0.0",
-    "vite-plugin-singlefile": "^2.0.0",
-    "@playwright/test": "^1.50.0"
+    "vite-plugin-singlefile": "^2.0.0"
   }
 }

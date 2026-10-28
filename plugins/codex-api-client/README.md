@@ -105,3 +105,13 @@ OAuth2 的“开始 OAuth 授权”是唯一打开系统浏览器的操作。授
 `api_oauth_start({flow,authorizationUrl?,tokenUrl,clientId,clientSecret?,scope?,target:{kind,id,key}})`、`api_oauth_poll({sessionId})`、`api_oauth_cancel({sessionId})`、`api_oauth_refresh({target})` 均仅对 App 可见。`target.kind` 为 `environment` 或 `globals`（UI 选择环境）；结果只含会话状态、目标和过期时间等脱敏元信息。客户端凭据与刷新操作立即返回 pending 会话 ID，界面通过 poll 获取完成状态，交换期间可取消；离开认证面板也会取消。最多 4 个活动 OAuth 会话，完成结果保留 5 分钟，最多 100 条。
 
 请求“网络”面板可覆盖超时、TLS 校验、重定向、代理和上传 CA/客户端证书；省略字段继承全局，保存在请求 item 的 `x-codex-api-client.network`。`proxy:null` 表示直接连接，不回退系统环境变量代理。全局设置支持 `proxyCredentials:[{key:"username",value,type:"secret"},{key:"password",value,type:"secret"}]` 及 `noProxy` 原生 URL 匹配规则（如 `http+https://localhost:*/*`）。凭据和绕过规则由 Postman SDK 处理。请求 CA/证书路径纳入加密备份附件访客并在恢复时重映射，文件访问仍受显式许可/上传附件限制。HTTP 集合逐项重置网络设置，后续请求不继承前一请求的覆盖。
+
+### SSE / WebSocket / Socket.IO 交互调试
+
+在请求地址栏选择协议，保存后点击「连接协议」。协议配置保存在 `request['x-codex-api-client'].protocol`，格式为 `{version:1,type:'sse'|'websocket'|'socketio',connectTimeout?,operationTimeout?,reconnectAttempts?,reconnectDelay?,path?,auth?,subprotocols?}`。URL、请求头和常用认证沿用请求本身，环境仅在连接时在后端解析；Socket.IO 握手 `auth` 的各值使用 `{key,type:'secret',value}` 保存，自动进入 Keychain，普通导出排除值。`path/auth` 仅用于 Socket.IO，`subprotocols` 仅用于 WebSocket。导入、打开请求或服务重启不会连接。
+
+SSE 实时显示多行 data、event、id、retry；WebSocket 可发送文本或 Base64 二进制；Socket.IO 支持事件名、JSON 参数数组、二进制及可选 ACK。默认连接超时 30 秒（继承请求 requestTimeout），操作超时 5 秒，自动重连 0 次。SSE/Socket.IO 可显式设置最多 3 次重连，间隔默认 1000ms、最大 60 秒；SSE 采用服务端 retry（同样封顶 60 秒），重连携带 Last-Event-ID。WebSocket 通过再次点击连接显式重连。
+
+每服务最多 4 个活动会话及 4 个保留会话；新建时淘汰最旧终态会话。每会话最多 1000 条/10 MiB，单条序列化事件最多 1 MiB，超限单条改为固定错误事件；界面只显示最近 200 条。`api_protocol_connect({collectionId,itemId,environmentId?})` 返回 `{sessionId,state}`；`api_protocol_action({sessionId,action,payload})`：WebSocket `send` 使用 `{text}` 或 `{encoding:'base64',base64}`，Socket.IO `emit` 使用 `{event,args?,binary?,ack?}`；`api_protocol_events({sessionId,after?,limit?})`（limit 1–1000）返回 `{state,events,cursor,firstSeq,gap}`，事件为 `{seq,time,type,data}`。二进制在脱敏后表示为 `{encoding:'base64',base64,size}`。`gap` 表示旧游标前的数据已被淘汰。`api_protocol_disconnect({sessionId})` 显式关闭。会话仅属于创建它的服务；标签切换保留连接，关闭所属标签（包含非活动标签）和服务退出会断开。
+
+协议不执行 HTTP Runner、pm.* 脚本或逐消息断言；HTTP Send/Runner 拒绝混入协议请求，cURL 导出拒绝协议请求，Postman 导出明确警告其协议扩展无法作为原生 HTTP 执行。支持请求头、Basic/Bearer/OAuth2 header/header API key；其他认证明确拒绝。网络继承 item 扩展 `network` 与全局设置；ws/Socket.IO 支持 strictSSL，SSE 必须验证 TLS。代理、代理认证、自定义 CA、客户端证书和 noProxy 暂不支持，配置存在时连接会明确失败；ws/Socket.IO 的 followRedirects=false 覆盖也会明确失败。协议错误使用固定信息，密钥及其 Base64/hex/URL 编码和二进制回显会在缓冲前脱敏。自定义业务请求头中未标记的秘密和消息正文不能自动分类，请用敏感变量引用。

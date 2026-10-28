@@ -1,5 +1,7 @@
+import {ProtocolSessions} from './protocol-sessions.mjs';
+import {webAdapters,validateWebConfig} from './protocol-web.mjs';
 import {OAuthSessions} from './oauth.mjs';
-import {materializeNetwork,networkOf,markCredentials} from './auth.mjs';
+import {materializeNetwork,networkOf,markCredentials,authProblem} from './auth.mjs';
 import {BackupService} from './backup.mjs';
 import {BackupTransfer} from './backup-transfer.mjs';
 import { randomUUID } from 'node:crypto';
@@ -18,7 +20,40 @@ const summary = run => ({ id:run.id,status:run.status,name:run.name,createdAt:ru
 const json = v => JSON.stringify(v);
 
 export class ApiService {
-  constructor(store,{oauth}={}) { this.oauth=new OAuthSessions(store,oauth); this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store)); }
+  constructor(store,{oauth}={}) { this.protocols=new ProtocolSessions(webAdapters); this.oauth=new OAuthSessions(store,oauth); this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store)); }
+  async protocolConnect({collectionId,itemId,environmentId}) {
+    const collection=await this.store.get('collection',collectionId,{reveal:true});
+    const found=findItem(collection?.data||{},itemId);if(!found?.item.request)throw Error('NOT_FOUND');
+    const request=found.item.request,config=request['x-codex-api-client']?.protocol;
+    if(!config||config.version!==1)throw Error('PROTOCOL_CONFIG_INVALID: 需要 version=1');
+    const globals=await this.store.get('globals','default',{reveal:true}),environment=environmentId?await this.store.get('environment',environmentId,{reveal:true}):null;
+    if(environmentId&&!environment)throw Error('NOT_FOUND: 环境不存在');
+    const settings=await this.store.get('settings','default',{reveal:true});
+    const secrets=[];for(const doc of [collection,globals,environment,settings])if(doc)await transformSecrets(doc.data,v=>{secrets.push(v.value);return v;});
+    const variables={};for(const rows of [globals?.data.values,collection.data.variable,...(collection.data['x-codex-api-client']?.compatibilityMode==='extended'?found.parents.map(p=>p.variable):[]),environment?.data.values])for(const row of rows||[])if(!row.disabled)variables[row.key]=row.value;
+    const resolve=v=>{if(typeof v==='string')return v.replace(/{{([^{}]+)}}/g,(_,key)=>{if(!(key in variables))throw Error('PROTOCOL_VARIABLE_UNRESOLVED');return String(variables[key]);});if(Array.isArray(v))return v.map(resolve);if(v&&typeof v==='object'){if(isSecret(v))return {...v,value:resolve(v.value)};return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,resolve(x)]));}return v;};
+    const headers={};for(const row of resolve(request.header||[]))if(!row.disabled)headers[row.key]=row.value;
+    const auth=resolve(request.auth||[collection.data,...found.parents].map(p=>p.auth).filter(Boolean).at(-1));
+    if(authProblem(auth))throw Error('PROTOCOL_AUTH_INVALID: 认证字段不完整或不支持');
+    if(auth&&auth.type!=='noauth'){
+      const p=Object.fromEntries((auth[auth.type]||[]).filter(v=>!v.disabled).map(v=>[v.key,v.value]));
+      if(auth.type==='basic')headers.Authorization='Basic '+Buffer.from(p.username+':'+p.password).toString('base64');
+      else if(auth.type==='bearer'||auth.type==='oauth2'){
+        if(auth.type==='oauth2'&&p.addTokenTo&&p.addTokenTo!=='header')throw Error('PROTOCOL_AUTH_UNSUPPORTED');
+        headers.Authorization=(p.headerPrefix||'Bearer')+' '+(p.token||p.accessToken||'');
+      }else if(auth.type==='apikey'&&p.in==='header')headers[p.key]=p.value;
+      else throw Error('PROTOCOL_AUTH_UNSUPPORTED: 此适配器支持 Basic/Bearer/OAuth2/header API key');
+    }
+    for(const [key,value]of Object.entries(headers))if(/authorization|cookie|api.?key|token/i.test(key)){secrets.push(value);if(/^(Basic|Bearer) /i.test(value))secrets.push(value.slice(value.indexOf(' ')+1));}
+    const network=resolve(materializeNetwork({...DEFAULT_SETTINGS,...settings?.data,...networkOf(found.item)}));
+    validateOptions(network);
+    const runtime={...resolve(config),url:resolve(typeof request.url==='string'?request.url:request.url?.raw||''),headers,network,secrets};runtime.connectTimeout??=network.requestTimeout;
+    if(runtime.auth)runtime.auth=Object.fromEntries(Object.entries(runtime.auth).map(([k,v])=>[k,isSecret(v)?v.value:v]));
+    validateWebConfig(runtime);return this.protocols.connect(runtime);
+  }
+  protocolAction(args){return this.protocols.action(args);}
+  protocolEvents(args){return this.protocols.events(args);}
+  protocolDisconnect(args){return this.protocols.disconnect(args);}
   oauthStart(args){return this.oauth.start(args);}
   oauthPoll(args){return this.oauth.poll(args);}
   oauthCancel(args){return this.oauth.cancel(args);}
@@ -106,12 +141,13 @@ export class ApiService {
     const data=await sanitizedPortableData(await this.store.export(kind,id));
     if(format==='curl') {
       const found=findItem(data,itemId),item=found?.item; if(!item?.request) throw new Error('NOT_FOUND');
+      if(item.request?.['x-codex-api-client']?.protocol)throw Error('PROTOCOL_EXPORT_UNSUPPORTED: cURL 无法表示协议会话');
       const inherited=[data,...found.parents].map(p=>p.auth).filter(Boolean).at(-1);
       return {text:exportCurl(item,inherited),name:item.name+'.sh',warnings:['cURL 不包含脚本、环境变量解析和工作区 Cookie；敏感变量值已排除。']};
     }
     const warnings=[];
     const scan=root=>{for(const item of root.item||[])if(item.item){if(item.variable?.length)warnings.push('文件夹变量为本插件扩展，原生 Postman 中需改写为文件夹前置脚本。');scan(item);}};
-    if(kind==='collection')scan(data);
+    if(kind==='collection'){scan(data);const protocols=root=>{if(root.request?.['x-codex-api-client']?.protocol)warnings.push('协议配置仅作为 API Client 扩展保存，Postman HTTP Runner 无法执行；导入不会自动连接。');for(const child of root.item||[])protocols(child);};protocols(data);}
     return {data,name:(data.info?.name||data.name||kind)+'.json',warnings:[...new Set(warnings)]};
   }
   async editItem({collectionId,itemId,operation,parentId,position=0,item,revision}) {
@@ -149,7 +185,7 @@ export class ApiService {
     const globalsDoc=await this.store.get('globals','default',{reveal:true});
     const cookiesDoc=await this.store.get('cookies','default',{reveal:true});
     const collection=selectCollection(collectionDoc.data,itemId), warnings=warningsFor(collection);
-    const validateNetwork=root=>{if(root.request)validateOptions({...options,...networkOf(root)});for(const child of root.item||[])validateNetwork(child);};validateNetwork(collection);
+    const validateNetwork=root=>{if(root.request?.['x-codex-api-client']?.protocol)throw Error('PROTOCOL_RUN_UNSUPPORTED: 协议请求请使用交互客户端，不支持 HTTP Runner 或 pm.* 脚本');if(root.request)validateOptions({...options,...networkOf(root)});for(const child of root.item||[])validateNetwork(child);};validateNetwork(collection);
     options.singleRequest=!!(itemId&&findItem(collectionDoc.data,itemId)?.item.request);
     if(introspect){
       const item=findItem(collection,itemId)?.item;
@@ -239,7 +275,7 @@ export class ApiService {
     if(own){own.controller.abort();await own.completion;}
     return this.result({runId});
   }
-  async close() { await this.oauth.close(); this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
+  async close() { await this.protocols.close(); await this.oauth.close(); this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
 }
 function sanitize(value,secrets) {
   const encoded=[];

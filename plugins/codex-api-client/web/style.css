@@ -134,3 +134,4 @@ button:disabled{cursor:not-allowed}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
 
 :root select{background-image:var(--select-arrow);background-repeat:no-repeat}
+.protocol-client{padding:20px;overflow:auto;flex:1;min-height:0}.protocol-client[hidden]{display:none}.protocol-client .url-bar input{flex:1;min-width:120px}.protocol-options{display:flex;gap:16px;flex-wrap:wrap}.protocol-options label{max-width:190px}.protocol-send{display:flex;gap:12px;flex-wrap:wrap;align-items:end;margin:16px 0}.protocol-send textarea{flex-basis:100%;width:100%}.protocol-events pre{padding:12px;border-bottom:1px solid var(--border);white-space:pre-wrap;overflow-wrap:anywhere}.protocol-events small{opacity:.65}.protocol-client fieldset{border:0;padding:12px 0;min-width:0}

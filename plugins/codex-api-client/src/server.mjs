@@ -22,7 +22,7 @@ export function createServer({directory=defaultDataDirectory(),secrets}={}) {
     contents:[{uri:APP_URI,mimeType:RESOURCE_MIME_TYPE,text:await readFile(new URL('../dist/index.html',import.meta.url),'utf8'),_meta:{ui:{prefersBorder:false,csp:{connectDomains:[],resourceDomains:[]}}}}],
   }));
   for(const [name,description,inputSchema,,readOnly,visibility]of TOOL_DEFINITIONS) {
-    const config={title:name==='api_client_open'?'API 调试台':name,description,inputSchema,annotations:{readOnlyHint:readOnly,destructiveHint:name==='api_document_delete',openWorldHint:name==='api_run_start'}};
+    const config={title:name==='api_client_open'?'API 调试台':name,description,inputSchema,annotations:{readOnlyHint:readOnly,destructiveHint:name==='api_document_delete',openWorldHint:['api_run_start','api_protocol_connect','api_protocol_action'].includes(name)}};
     const handler=async args=>{
       try {const value=await invoke(service,name,args);return {content:[{type:'text',text:JSON.stringify(value)}],structuredContent:value};}
       catch(error){return {isError:true,content:[{type:'text',text:error.message}]};}
