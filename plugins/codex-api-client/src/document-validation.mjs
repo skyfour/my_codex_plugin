@@ -14,7 +14,8 @@ function auth(value){
 }
 export function validateSettings(data){
  check(object(data));validateOptions(data);
- for(const key of ['proxy','caFile','selectedEnvironment'])optional(data,key,'string');
+ if(data.proxy!==null)optional(data,'proxy','string');
+ for(const key of ['caFile','selectedEnvironment'])optional(data,key,'string');
  if(data.allowedFiles!==undefined)check(Array.isArray(data.allowedFiles)&&data.allowedFiles.every(v=>typeof v==='string'));
  if(data.certificates!==undefined){check(Array.isArray(data.certificates));for(const c of data.certificates){check(object(c));if(c.matches!==undefined)check(Array.isArray(c.matches)&&c.matches.every(v=>typeof v==='string'));for(const key of ['key','cert','pfx'])if(c[key]!==undefined)check(typeof c[key]==='string'||(object(c[key])&&typeof c[key].src==='string'));}}
  if(data.ui!==undefined){check(object(data.ui));if(data.ui.theme!==undefined)check(['light','dark'].includes(data.ui.theme));optional(data.ui,'sidebarOpen','boolean');if(data.ui.responseTab!==undefined)check(['正文','响应头','Cookie','断言','日志','变量变化'].includes(data.ui.responseTab));}

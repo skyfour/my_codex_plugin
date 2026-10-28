@@ -95,3 +95,24 @@ test('archive validation preserves valid request IDs and unknown Postman fields 
  const archive={version:1,files:[],history:[],documents:[{kind:'collection',id:'original-document',data}]};const before=structuredClone(archive);target.validate(archive);assert.deepEqual(archive,before);
  await target.restore((await target.preview(encryptArchive(archive,'p'),'p','replace')).transferId);assert.deepEqual((await b.get('collection','original-document',{reveal:true})).data,data);
 }));
+test('own encrypted backup preserves direct proxy null over inherited proxy and rejects invalid proxy types',()=>isolated(async(a,b)=>{
+ const {createServer}=await import('node:http');let directHits=0,proxyHits=0;
+ const target=createServer((req,res)=>{directHits++;res.end('direct fixture');}),proxy=createServer();
+ proxy.on('connect',(req,socket)=>{proxyHits++;socket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');});
+ await new Promise(r=>target.listen(0,'127.0.0.1',r));await new Promise(r=>proxy.listen(0,'127.0.0.1',r));
+ const source=new ApiService(a),destination=new ApiService(b),backup=new BackupService(b);
+ try{
+  await source.put({kind:'settings',data:{proxy:`http://127.0.0.1:${proxy.address().port}`}});
+  const url=`http://127.0.0.1:${target.address().port}`;
+  await source.put({kind:'collection',id:'direct',data:{info:{name:'direct connection'},item:[{id:'direct-item',request:{method:'GET',url},'x-codex-api-client':{network:{proxy:null}}},{id:'inherited-item',request:{method:'GET',url}}]}});
+  const bytes=await new BackupService(a).export('p'),preview=await backup.preview(bytes,'p','replace');await backup.restore(preview.transferId);
+  assert.equal((await destination.get({kind:'collection',id:'direct'})).data.item[0]['x-codex-api-client'].network.proxy,null);
+  const inherited=await destination.start({collectionId:'direct',itemId:'inherited-item'});await destination.active.get(inherited.runId).completion;assert.equal(proxyHits,1);assert.equal(directHits,0);
+  const direct=await destination.start({collectionId:'direct',itemId:'direct-item'});await destination.active.get(direct.runId).completion;assert.equal((await destination.result({runId:direct.runId})).status,'completed');assert.equal(directHits,1);assert.equal(proxyHits,1);
+  const archive=decryptArchive(bytes,'p');
+  for(const invalid of [false,0,[],{}]){
+   const malformed=structuredClone(archive);malformed.documents.find(d=>d.kind==='collection').data.item[0]['x-codex-api-client'].network.proxy=invalid;
+   await assert.rejects(backup.preview(encryptArchive(malformed,'p'),'p'),/BACKUP_INVALID/);
+  }
+ }finally{await source.close();await destination.close();for(const server of [target,proxy]){server.closeAllConnections();await new Promise(r=>server.close(r));}}
+}));
