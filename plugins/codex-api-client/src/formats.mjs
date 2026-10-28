@@ -13,7 +13,6 @@ export function warningsFor(value) {
     if (v.script) {
       const script = [].concat(v.script.exec || []).join('\n');
       if (/pm\.(vault|require)\b/.test(script)) warnings.add('脚本使用 Vault 或云脚本包，首版不支持');
-      if (/pm\.execution\.runRequest\b/.test(script)) warnings.add('首版不支持 pm.execution.runRequest，请使用 pm.sendRequest');
     }
     if (v.request?.url && /^(ws|wss|grpc):/i.test(typeof v.request.url === 'string' ? v.request.url : v.request.url.raw || '')) warnings.add('只支持 HTTP/HTTPS 协议');
     for (const child of Object.values(v)) if (typeof child === 'object') visit(child);

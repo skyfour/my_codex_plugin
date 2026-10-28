@@ -28,7 +28,7 @@ npm run install:api-client
 
 ## 支持范围
 
-支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key 与高级鉴权、cURL/Postman、OpenAPI3/Swagger2 JSON/YAML、HAR 导入和 GraphQL、JSON/CSV 数据迭代和取消运行。OAuth2 支持系统浏览器授权码 + PKCE、客户端凭据和刷新；当前不支持 GraphQL 以外的其他协议、Vault 或云脚本包。
+支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key 与高级鉴权、cURL/Postman、OpenAPI3/Swagger2 JSON/YAML、HAR 导入和 GraphQL、JSON/CSV 数据迭代和取消运行。OAuth2 支持系统浏览器授权码 + PKCE、客户端凭据和刷新；另有 SSE、WebSocket/Socket.IO、gRPC、MQTT、远程 MCP 交互客户端；不支持 Vault 或云脚本包。
 
 ## 快速操作
 
@@ -49,13 +49,13 @@ npm run install:api-client
 
 ## 变量与响应查看
 
-URL 中能在当前作用域解析的变量显示绿色，未设置的变量显示红色并带点状下划线。悬停或将输入光标移入变量，可查看值及来源；敏感值显示掩码，空字符串与未设置分别提示。取值遵循运行时作用域顺序：文件夹、选中环境、集合、全局；禁用变量不参与解析。脚本保存的变量变化会在运行后刷新。
+URL 中能在当前作用域解析的变量显示绿色，未设置的变量显示红色并带点状下划线。悬停或将输入光标移入变量，可查看值及来源；敏感值显示掩码，空字符串与未设置分别提示。严格模式遵循 local > data > environment > collection > global；扩展模式额外应用文件夹临时作用域；禁用变量不参与解析。脚本保存的变量变化会在运行后刷新。
 
 JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；响应正文独立滚动，格式化、搜索、复制和保存工具栏固定在响应区顶部。
 
 ## 本地数据与运行限制
 
-默认数据目录为 `~/Library/Application Support/Codex API Client`，可通过 `CODEX_API_CLIENT_DATA_DIR` 修改。敏感变量和 Cookie 值使用 macOS Keychain；新电脑需要重新配置敏感值。将密码、Token 标记为敏感并通过 `{{token}}` 引用，不要硬编码到脚本或 URL。普通响应可存入本地历史。
+默认数据目录为 `~/Library/Application Support/Codex API Client`，可通过 `CODEX_API_CLIENT_DATA_DIR` 修改。敏感变量和 Cookie 值使用 macOS Keychain；新电脑可用完整加密备份迁移敏感值，普通导出则需要重新配置。将密码、Token 标记为敏感并通过 `{{token}}` 引用，不要硬编码到脚本或 URL。普通响应可存入本地历史。
 
 每次保存检查 revision，遇到并发冲突保留未保存编辑。默认超时为请求 30 秒、脚本 5 秒、运行 120 秒；每个服务最多同时 4 次运行，不作为压测工具。
 
@@ -65,7 +65,7 @@ JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；
 
 ## 常见问题
 
-**新电脑如何继续使用原有请求？** 在旧电脑点击「导出全部」，在新电脑安装插件后导入备份。敏感值、Cookie 和本机文件附件不随备份迁移，需要重新配置；详细范围见[整体导入与导出](#整体导入与导出)。
+**新电脑如何继续使用原有请求？** 在旧电脑点击「导出全部」，在新电脑安装插件后导入备份。普通导出不迁移敏感值、Cookie 和附件；需要全部迁移时使用「完整备份与恢复」，密码加密归档包含这些内容；详细范围见[整体导入与导出](#整体导入与导出)。
 
 **界面更新了，安装后仍是旧版？** 先确认安装脚本完成构建，再重新打开 Codex 并新建聊天。开发预览也需先运行 `npm run build`。
 
@@ -126,3 +126,19 @@ SSE 实时显示多行 data、event、id、retry；WebSocket 可发送文本或 
 - MCP：仅远程 SDK v1 Streamable HTTP（`transport:'http'`，默认）和旧 SSE（`transport:'sse'`），系统TLS、同源端点、禁止重定向和stdio。操作 `listTools/listResources/listPrompts {cursor?}`、`callTool {name,arguments?}`、`readResource {uri}`、`getPrompt {name,arguments?}`、`cancel {}`；目录/结果按操作名写入事件。最多8个待处理调用，单次默认5秒，可用 `operationTimeout` 调整；取消通知和连接关闭由SDK处理。
 
 会话沿用4连接、1000条/10MiB事件、1MiB单条上限；`connectTimeout`/`operationTimeout` 为1–300000ms。原生协议文件引用仅按 `protoFiles[].path` 与 `tls.caFile/certFile/keyFile` 迁移，不重写相同的业务字符串。反射客户端1.4.1与grpc-js1.14.6固定版本；反射close仍有带检查的兼容代码，升级须重跑反射/取消/TLS用例。gRPC 使用固定Node专用子进程，断开/超时强制终止并等待退出，包含尚未完成TCP建连的socket；清理完成前继续占用最多4会话的配额。IPC保留二进制，最多16个待处理操作、1024条/4MiB待发送事件，单条1MiB；队列溢出明确失败并清理。界面独立保留当前方法和3类MCP目录（每类最多1000项），不随最近200条事件滚动淘汰，重新连接时清空。
+
+## 响应预览、Cookie 与工作区子请求
+
+响应按 Content-Type 显示 JSON/XML/文本、常见栅格图片、HTML 和 PDF。原始正文、搜索和字节下载保留；下载来自运行结果的脱敏字节，不能用于逐字节还原含敏感值的原始传输。HTML 和 `pm.visualizer.set` 的已渲染模板在独立 opaque-origin iframe 内显示，sandbox 不启用脚本或同源权限，内置 CSP 禁止外部网络。静态元素白名单去除脚本、导航、meta refresh、链接、表单、嵌套 frame 和 SVG；保留基础排版/表格/内联样式及 data 栅格图片。超过1MiB的 HTML 请查看原始内容或下载。Visualizer 的 JavaScript、外部图表库和交互脚本不运行。SVG 仅下载，PDF 提供下载后的本地打开入口，宿主可能阻止内嵌显示。
+
+设置中的 Cookie 管理支持域筛选、新增/删除、清空所选域及名称、值、Path、过期时间、Secure、HttpOnly、SameSite、hostOnly 编辑。选择域后才通过 App-only `api_cookies_get` 显示该域值；`api_cookies_edit` 使用 revision 替换该域，其他域不变。普通工作区、模型工具结果及运行报告继续隐藏 Cookie 值。
+
+`pm.execution.runRequest(id, {variables})` 使用已安装 Postman 原生嵌套执行器在当前工作区查找请求，保留祖先认证/脚本、原生变量继承、结果和错误。优先当前集合的内部 ID；外部集合存在多个相同 ID 时明确拒绝，避免恢复副本使用错误凭据。最大深度4、同一运行最多20次调用，并受整次运行期限（默认120秒）、脚本期限和取消控制。嵌套请求各自应用网络/认证设置，不能通过它启动非HTTP协议。每个 HTTP Run 使用固定子进程，取消和完成等待该进程退出。
+
+## 密码加密完整备份
+
+「完整备份与恢复」与普通「导出全部」并存。完整归档包含集合及协议配置、环境/全局变量、已存凭据、Cookie、网络/UI设置、显式引用的上传附件/CA/证书私钥；历史默认不包含，可明确选择。使用 scrypt 与 AES-256-GCM，密码只通过 App-only `api_backup_*` 工具提交；1MiB分块传输、会话15分钟过期、最多8个传输。错误密码、篡改和不合法附件整体拒绝。归档并非可公开分享文件，应由用户安全保管密码和文件。
+
+导入先解密预览，再确认。默认作为新增副本合并，保留内部请求 ID；globals、Cookie、设置冲突默认保留本机值，可逐项选用备份。替换工作区先生成可下载的加密恢复快照。恢复重建环境映射、目标Keychain引用及私有附件路径，仅按已知文件字段重写，不复制源机任意 allowedFiles。失败回滚新增文件、凭据和数据库变更。活动HTTP运行、协议资源或OAuth授权存在时恢复会拒绝；恢复期间不能新启动它们。恢复和服务重启不自动运行脚本、连接协议或重订阅。
+
+MCP 的HTTP JSON和旧SSE读取在SDK解析前限制解码后的单次HTTP响应最多10MiB；SSE此限制是一次连接的累计流量，达到上限会明确失败，需显式重新连接，与UI滚动事件窗口的10MiB上限不同。Handlebars使用兼容补丁4.7.10，Zod锁定解析依赖更新至4.6.7；依赖审计仍有16项（8 moderate、8 high），不宣称无漏洞。

@@ -13,7 +13,7 @@ export function executeCollection(input, { signal, onEvent = () => {} } = {}) {
     const finish = extra => {
       if (done) return; done = true;
       clearTimeout(timer); signal?.removeEventListener('abort', cancel);
-      Object.assign(result, extra); child.kill('SIGKILL'); resolve(result);
+      Object.assign(result, extra); child.once('close',()=>resolve(result)); child.kill('SIGKILL');
     };
     const cancel = () => finish({ status: 'cancelled' });
     const timer = setTimeout(() => {
@@ -30,6 +30,7 @@ export function executeCollection(input, { signal, onEvent = () => {} } = {}) {
         result.errors.push({message:'RUN_LIMIT: 运行结果超过 50 MB 或 10000 条记录'}); return finish({status:'failed'});
       }
       if (message.type === 'done') return finish(message.value);
+      if(message.type==='visualizer'){const response=result.responses.findLast(r=>r.itemId===message.value.itemId);if(response)response.visualizer=message.value.html;}
       if (message.type === 'response') result.responses.push(message.value);
       if (message.type === 'assertion') result.assertions.push(message.value);
       if (message.type === 'log') result.logs.push(message.value);

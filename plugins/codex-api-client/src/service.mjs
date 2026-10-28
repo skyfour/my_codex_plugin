@@ -4,7 +4,7 @@ import {grpcAdapter,grpcDefinition} from './protocol-grpc.mjs';
 import {mqttAdapter} from './protocol-mqtt.mjs';
 import {mcpAdapter} from './protocol-mcp.mjs';
 import {OAuthSessions} from './oauth.mjs';
-import {materializeNetwork,networkOf,markCredentials,authProblem} from './auth.mjs';
+import {materializeNetwork,networkOf,markCredentials,authProblem,validateOptions} from './auth.mjs';
 import {BackupService} from './backup.mjs';
 import {BackupTransfer} from './backup-transfer.mjs';
 import { randomUUID } from 'node:crypto';
@@ -24,7 +24,23 @@ const summary = run => ({ id:run.id,status:run.status,name:run.name,createdAt:ru
 const json = v => JSON.stringify(v);
 
 export class ApiService {
-  constructor(store,{oauth}={}) { this.protocols=new ProtocolSessions({...webAdapters,grpc:grpcAdapter,mqtt:mqttAdapter,mcp:mcpAdapter}); this.oauth=new OAuthSessions(store,oauth); this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store)); }
+  constructor(store,{oauth}={}) { this.protocols=new ProtocolSessions({...webAdapters,grpc:grpcAdapter,mqtt:mqttAdapter,mcp:mcpAdapter}); this.oauth=new OAuthSessions(store,oauth); this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store));
+    this.starting=0;this.pendingStarts=new Set();
+    for(const name of ['start','protocolConnect','oauthStart','oauthRefresh']){
+      const operation=this[name].bind(this);
+      this[name]=async(...args)=>{if(this.restoring||this.closed)throw Error('WORKSPACE_BUSY');this.starting++;const pending=operation(...args);this.pendingStarts.add(pending);try{return await pending;}finally{this.starting--;this.pendingStarts.delete(pending);}};
+    }
+  }
+  cookieDomain(value){const domain=value.toLowerCase().replace(/^\./,'');if(!/^[a-z0-9][a-z0-9.-]*$/.test(domain)||domain.includes('..'))throw Error('COOKIE_DOMAIN_INVALID');return domain;}
+  async cookiesGet({domain}){domain=this.cookieDomain(domain);const doc=await this.store.get('cookies','default',{reveal:true});return {domain,revision:doc?.revision||0,cookies:(doc?.data.cookies||[]).filter(c=>this.cookieDomain(c.domain||'')===domain).map(({secretRef,type,sensitive,domain,...c})=>c)};}
+  async cookiesEdit({domain,revision,cookies}){
+    domain=this.cookieDomain(domain);
+    const doc=await this.store.get('cookies','default',{reveal:true});
+    const seen=new Set();
+    for(const c of cookies){const identity=c.path+'\0'+c.key;if(seen.has(identity)||/[\x00-\x20;=]/.test(c.key)||/[\r\n;]/.test(c.value)||(c.expires&&c.expires!=='Infinity'&&!Number.isFinite(Date.parse(c.expires))))throw Error('COOKIE_INVALID');seen.add(identity);}
+    const data={...doc?.data,cookies:[...(doc?.data.cookies||[]).filter(c=>this.cookieDomain(c.domain||'')!==domain),...cookies.map(c=>({...c,domain,hostOnly:c.hostOnly!==false}))]};
+    return this.put({kind:'cookies',id:'default',revision,data});
+  }
   async protocolConnect({collectionId,itemId,environmentId}) {
     const collection=await this.store.get('collection',collectionId,{reveal:true});
     const found=findItem(collection?.data||{},itemId);if(!found?.item.request)throw Error('NOT_FOUND');
@@ -101,7 +117,12 @@ export class ApiService {
   }
   backupStart(args){return this.backups.start(args);}
   backupChunk(args){return this.backups.chunk(args);}
-  backupFinish(args){return this.backups.finish(args);}
+  async backupFinish(args){
+    const session=this.backups.sessions.get(args.transferId);
+    if(!session?.previewId)return this.backups.finish(args);
+    if(this.restoring||this.starting||this.active.size||[...this.protocols.sessions.values()].some(s=>s.cleanupPending||!['closed','failed'].includes(s.state))||[...this.oauth.sessions.values()].some(s=>s.status==='pending'||s.exchanging))throw Error('WORKSPACE_BUSY: 请先停止运行、协议连接和 OAuth 授权，再恢复');
+    this.restoring=true;try{return await this.backups.finish(args);}finally{this.restoring=false;}
+  }
   backupCancel(args){return this.backups.cancel(args);}
   async state() {
     const [collections,environments,globals,settings,cookies]=await Promise.all(['collection','environment','globals','settings','cookies'].map(k=>this.store.list(k)));
@@ -234,13 +255,16 @@ export class ApiService {
     const uploads=join(this.store.directory,'uploads');
     const owned=(await readdir(uploads).catch(()=>[])).map(p=>join(uploads,p));
     options.allowedFiles=[...owned,...(options.allowedFiles||[])].map(p=>resolve(p));
+    const workspace=await Promise.all((await this.store.list('collection')).map(d=>this.store.get('collection',d.id,{reveal:true})));
     const secretValues=[];
-    for(const d of [collectionDoc,environmentDoc,globalsDoc,cookiesDoc,settingsDoc])if(d)await transformSecrets(d.data,v=>{secretValues.push(v.value);return v;});
+    for(const d of [...workspace,collectionDoc,environmentDoc,globalsDoc,cookiesDoc,settingsDoc])if(d)await transformSecrets(d.data,v=>{secretValues.push(v.value);return v;});
     // Scripts receive the actual values, without implementation-specific Keychain references.
     const secretKeys={environment:[],globals:[],collectionVariables:[]};
     for(const [doc,scope]of [[environmentDoc,'environment'],[globalsDoc,'globals'],[collectionDoc,'collectionVariables']])if(doc)await transformSecrets(doc.data,v=>{secretKeys[scope].push(v.key);return v;});
     const resolved=async d=>transformSecrets(d||{},v=>{delete v.secretRef;v.type='string';delete v.sensitive;return v;});
-    const input={collection:await resolved(collection),environment:await resolved(environmentDoc?.data),globals:await resolved(globalsDoc?.data),cookies:await resolved(cookiesDoc?.data),data,options:materializeNetwork(options),secretKeys};
+    // Runtime-only identity uses document IDs: restored copies may share Postman collection IDs.
+    collection.info._postman_id=collectionId;
+    const input={workspace:await Promise.all(workspace.map(d=>resolved({...d.data,info:{...d.data.info,_postman_id:d.id}}))),collection:await resolved(collection),environment:await resolved(environmentDoc?.data),globals:await resolved(globalsDoc?.data),cookies:await resolved(cookiesDoc?.data),data,options:materializeNetwork(options),secretKeys};
     const run={id:randomUUID(),status:'running',name:collection.info.name,collectionId,itemId,environmentId,createdAt:new Date().toISOString(),responses:[],assertions:[],logs:[],errors:[],variableChanges:[]};
     const controller=new AbortController();this.store.saveRun(run);
     const cancellationPoll=setInterval(()=>{if(this.store.isCancelled(run.id))controller.abort();},200);
@@ -310,7 +334,7 @@ export class ApiService {
     if(own){own.controller.abort();await own.completion;}
     return this.result({runId});
   }
-  async close() { await this.protocols.close(); await this.oauth.close(); this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
+  async close() { this.closed=true; await Promise.allSettled([...this.pendingStarts]); await this.protocols.close(); await this.oauth.close(); this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
 }
 function sanitize(value,secrets) {
   const encoded=[];
@@ -335,19 +359,7 @@ function sanitize(value,secrets) {
   if(clean.responses)clean.responses.forEach(fix);else fix(clean);
   return clean;
 }
-export function validateOptions(options) {
-  for(const key of ['strictSSL','followRedirects'])if(options[key]!==undefined&&typeof options[key]!=='boolean')throw new Error('NETWORK_INVALID: '+key+' 必须是布尔值');
-  if(options.noProxy!==undefined&&(!Array.isArray(options.noProxy)||options.noProxy.some(v=>typeof v!=='string')))throw new Error('NETWORK_INVALID: noProxy 需要匹配规则数组');
-  if(options.proxyCredentials!==undefined&&(!Array.isArray(options.proxyCredentials)||options.proxyCredentials.some(v=>!v||!['username','password'].includes(v.key))))throw new Error('NETWORK_INVALID: 代理凭据格式错误');
-
-  for(const [key,min,max]of [['requestTimeout',1,300000],['scriptTimeout',1,60000],['runTimeout',100,600000],['iterations',1,1000],['delay',0,60000],['maxResponseSize',1,20*1024*1024]]) {
-    if(options[key]!==undefined&&(!Number.isInteger(options[key])||options[key]<min||options[key]>max))throw new Error(`LIMIT: ${key} 必须是 ${min}–${max} 的整数`);
-  }
-  if(options.proxy){
-    if(!/^http:\/\//.test(options.proxy))throw new Error('PROXY: 首版仅支持 HTTP 代理 URL');
-    const proxy=new URL(options.proxy);if(proxy.username||proxy.password)throw new Error('PROXY: 凭据请使用专用密码字段');
-  }
-}
+export {validateOptions} from './auth.mjs';
 
 function collectionPreview(data){const requests=root=>(root.item||[]).flatMap(i=>i.item?requests(i):[i.request]);const all=requests(data);const auths=root=>[root.auth?.type,root.request?.auth?.type,...(root.item||[]).flatMap(auths)].filter(Boolean);return {requestCount:all.length,collections:[{name:data.info.name,requestCount:all.length}],servers:[...new Set(all.map(r=>(typeof r?.url==='string'?r.url:r?.url?.raw||'').replace(/\{\{([^}]+)\}\}/g,(match,key)=>data.variable?.find(v=>v.key===key&&!v.disabled)?.value??match)))].slice(0,20),auth:[...new Set(auths(data))]};}
 

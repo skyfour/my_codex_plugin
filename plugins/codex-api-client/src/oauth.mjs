@@ -36,6 +36,7 @@ export class OAuthSessions{
   return this.status(s);
  }
  async exchange(s,grant){
+  s.exchanging=true;
   try{
    const c=s.config,body=new URLSearchParams({...grant,client_id:c.clientId,...(c.clientSecret?{client_secret:c.clientSecret}:{}),...(c.scope?{scope:c.scope}:{})});
    const response=await fetch(endpoint(c.tokenUrl),{method:'POST',redirect:'error',headers:{'Content-Type':'application/x-www-form-urlencoded'},body,signal:s.controller.signal});
@@ -51,7 +52,7 @@ export class OAuthSessions{
    const metaKey=s.target.key+'.__oauth';const clean=values.filter(v=>v.key!==metaKey);clean.push({key:metaKey,value:JSON.stringify(metadata),type:'secret'});
    await this.store.putMany([{kind:s.target.kind,id:s.target.id,data:{...doc.data,values:clean},expectedRevision:doc.revision}],{beforeCommit:()=>{if(s.status!=='pending')throw Error('OAUTH_CANCELLED');}});
    s.token={stored:true,variable:s.target.key,expiresAt:metadata.expiresAt};this.finish(s,'completed');
-  }catch{this.finish(s,'failed','OAUTH_EXCHANGE: 授权交换失败，请检查配置或重试');}
+  }catch{this.finish(s,'failed','OAUTH_EXCHANGE: 授权交换失败，请检查配置或重试');}finally{s.exchanging=false;}
  }
  async refresh({target}){
   if([...this.sessions.values()].filter(s=>s.status==='pending').length>=4||this.sessions.size>=100)throw Error('OAUTH_LIMIT');

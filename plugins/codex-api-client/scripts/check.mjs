@@ -1,3 +1,4 @@
+import {TOOL_DEFINITIONS} from '../src/tools.mjs';
 import { readFile,access,mkdtemp,rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -20,7 +21,8 @@ const directory=await mkdtemp(join(tmpdir(),'api-check-'));
 const client=new Client({name:'install-check',version:'1.0.0'}),transport=new StdioClientTransport({command:process.execPath,args:['--experimental-sqlite',join(root,'src/server.mjs')],env:{HOME:process.env.HOME,PATH:process.env.PATH,CODEX_API_CLIENT_DATA_DIR:directory},stderr:'pipe'});
 try{
   await client.connect(transport);
-  const tools=await client.listTools();assert.equal(tools.tools.length,14);
+  const tools=await client.listTools();assert.deepEqual(tools.tools.map(t=>t.name).sort(),TOOL_DEFINITIONS.map(d=>d[0]).sort());
+  for(const [name,,,,,visibility]of TOOL_DEFINITIONS)if(visibility==='app')assert.deepEqual(tools.tools.find(t=>t.name===name)._meta.ui.visibility,['app']);
   const entrypoint=tools.tools.find(t=>t.name==='api_client_open');
   assert.equal(entrypoint._meta['openai/ui'].entrypoints[0].type,'global');
   assert.equal(entrypoint.icons?.[0]?.mimeType,'image/svg+xml','Sidebar entrypoint must publish its icon in tools/list');

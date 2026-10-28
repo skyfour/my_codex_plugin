@@ -1,10 +1,11 @@
-import {materializeNetwork,networkOf,authProblem} from './auth.mjs';
-import {compatibilityMode} from './collections.mjs';
+import {materializeNetwork,networkOf,authProblem,validateOptions} from './auth.mjs';
+import {compatibilityMode,findItem,selectCollection} from './collections.mjs';
 import runtime from 'postman-runtime';
 import sdk from 'postman-collection';
 import request from 'postman-request';
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import {randomUUID} from 'node:crypto';
 import { realpathSync } from 'node:fs';
 const require = createRequire(import.meta.url);
 const { CookieJar } = require('@postman/tough-cookie');
@@ -16,29 +17,36 @@ process.once('message', input => {
   try { run(input); } catch (error) { send('error', errorJSON(error)); send('done',{status:'failed'}); }
 });
 
-function run({ collection, environment = {}, globals = {}, cookies, data = [], options = {}, secretKeys = {} }) {
-  // Postman v2.1 has no native folder-variable scope. Expose our folder variables
-  // as temporary variables, restoring the previous local scope between items.
-  const folderScopes={},networks={};
-  const visitNetworks=root=>{if(root.request){const network=networkOf(root);networks[root.id]=materializeNetwork({...options,...network});for(const key of ['strictSSL','followRedirects'])if(network[key]!==undefined)root.protocolProfileBehavior={...root.protocolProfileBehavior,[key]:network[key]};}for(const child of root.item||[])visitNetworks(child);};visitNetworks(collection);
-  const visitScopes=(root,inherited=[])=>{
-    const scope=root.item&&root!==collection?[...inherited,...(root.variable||[])]:inherited;
-    for(const item of root.item||[])if(item.item)visitScopes(item,scope);else folderScopes[item.id]=scope;
+function run({ collection, environment = {}, globals = {}, cookies, data = [], options = {}, secretKeys = {}, workspace = [] }) {
+  collection.info={...collection.info,_postman_id:collection.info?._postman_id||randomUUID()};
+  workspace=workspace.map(v=>({...v,info:{...v.info,_postman_id:v.info?._postman_id||randomUUID()}}));
+  const prepareScopes=input=>{
+    let collection=structuredClone(input);
+    const profiles=root=>{if(root.request){const network=networkOf(root);for(const key of ['strictSSL','followRedirects'])if(network[key]!==undefined)root.protocolProfileBehavior={...root.protocolProfileBehavior,[key]:network[key]};}for(const child of root.item||[])profiles(child);};profiles(collection);
+    // Postman v2.1 has no native folder-variable scope. Expose our folder variables
+    // as temporary variables, restoring the previous local scope between items.
+    const folderScopes={};
+    const visitScopes=(root,inherited=[])=>{
+      const scope=root.item&&root!==collection?[...inherited,...(root.variable||[])]:inherited;
+      for(const item of root.item||[])if(item.item)visitScopes(item,scope);else folderScopes[item.id]=scope;
+    };
+    if(compatibilityMode(collection)==='extended')visitScopes(collection);
+    if(Object.values(folderScopes).some(v=>v.length)){
+      collection=structuredClone(collection);
+      collection.event=[{listen:'prerequest',script:{type:'text/javascript',exec:[
+        `const __scopes=${JSON.stringify(folderScopes)};`,
+        'const __slot="__codex_api_client_folder_scope";',
+        'const __prior=pm.variables.get(__slot)||{};',
+        'Object.keys(__prior).forEach(k=>{if(__prior[k].exists)pm.variables.set(k,__prior[k].value);else pm.variables.unset(k);});',
+        'const __saved={};',
+        'const __locals=Object.fromEntries((pm.variables.toJSON().values||[]).filter(v=>!v.disabled).map(v=>[v.key,v.value]));',
+        '(__scopes[pm.info.requestId]||[]).filter(v=>!v.disabled).forEach(v=>{if(!Object.prototype.hasOwnProperty.call(__saved,v.key))__saved[v.key]={exists:Object.prototype.hasOwnProperty.call(__locals,v.key),value:__locals[v.key]};pm.variables.set(v.key,pm.variables.replaceIn(String(v.value??"")));});',
+        'pm.variables.set(__slot,__saved);'
+      ]}},...(collection.event||[])];
+    }
+    return collection;
   };
-  if(compatibilityMode(collection)==='extended')visitScopes(collection);
-  if(Object.values(folderScopes).some(v=>v.length)){
-    collection=structuredClone(collection);
-    collection.event=[{listen:'prerequest',script:{type:'text/javascript',exec:[
-      `const __scopes=${JSON.stringify(folderScopes)};`,
-      'const __slot="__codex_api_client_folder_scope";',
-      'const __prior=pm.variables.get(__slot)||{};',
-      'Object.keys(__prior).forEach(k=>{if(__prior[k].exists)pm.variables.set(k,__prior[k].value);else pm.variables.unset(k);});',
-      'const __saved={};',
-      'const __locals=Object.fromEntries((pm.variables.toJSON().values||[]).filter(v=>!v.disabled).map(v=>[v.key,v.value]));',
-      '(__scopes[pm.info.requestId]||[]).filter(v=>!v.disabled).forEach(v=>{if(!Object.prototype.hasOwnProperty.call(__saved,v.key))__saved[v.key]={exists:Object.prototype.hasOwnProperty.call(__locals,v.key),value:__locals[v.key]};pm.variables.set(v.key,pm.variables.replaceIn(String(v.value??"")));});',
-      'pm.variables.set(__slot,__saved);'
-    ]}},...(collection.event||[])];
-  }
+  collection=prepareScopes(collection);
   const c = new sdk.Collection(collection), env = new sdk.VariableScope(environment), globalScope = new sdk.VariableScope(globals);
   const jar = cookies?.cookies ? CookieJar.deserializeSync(cookies) : request.jar();
   jar.allowProgrammaticAccess = () => true;
@@ -73,11 +81,22 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
     }
   };
   const proxiesFor=o=>new sdk.ProxyConfigList({},o.proxy?[{match:'http+https://*:*/*',host:new URL(o.proxy).hostname,port:Number(new URL(o.proxy).port)||80,protocol:'http',tunnel:true,authenticate:!!(o.proxyUsername||o.proxyPassword),username:o.proxyUsername,password:o.proxyPassword,bypass:o.noProxy||[]}]:[]);
-  for(const o of Object.values(networks)){
-    if(o.caFile)permit(o.caFile);
-    for(const c of o.certificates||[])for(const field of ['cert','key','pfx'])if(c[field]?.src)permit(c[field].src);
-  }
+  let nestedCalls=0;
+  const home=workspace.find(v=>collection.info?._postman_id&&v.info?._postman_id===collection.info?._postman_id)||collection;
+  const resolverFor=current=>function(id,context,cb){
+      try{
+        if(++nestedCalls>20)throw Error('RUN_REQUEST_CALL_LIMIT: 最多 20 次嵌套调用');
+        const own=findItem(current,id)?.item.request?current:null;
+        const matches=own?[own]:workspace.filter(v=>findItem(v,id)?.item.request);
+        if(matches.length!==1)throw Error(matches.length?'RUN_REQUEST_AMBIGUOUS: 请求 ID 存在多个副本':'RUN_REQUEST_NOT_FOUND: 工作区请求不存在');
+        const selected=prepareScopes(selectCollection(matches[0],id));
+        const inspect=root=>{if(root.request)validateOptions({...options,...networkOf(root)});if(root.request?.['x-codex-api-client']?.protocol)throw Error('PROTOCOL_RUN_UNSUPPORTED');for(const child of root.item||[])inspect(child);};inspect(selected);checkFiles(selected);
+        cb(null,selected);
+      }catch(error){cb(error);}
+    };
   const config = {
+    maxInvokableNestedRequests:4,
+    script:{requestResolver:resolverFor(home)},
     disableSNR: options.singleRequest === true,
     timeout: { request: options.requestTimeout ?? 30000, script: options.scriptTimeout ?? 5000 },
     environment: env, globals: globalScope,
@@ -96,24 +115,47 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
     proxies: proxiesFor(options),ignoreProxyEnvironmentVariables:true,
   };
   if (options.caFile) permit(options.caFile);
+  // Worker-local native seam: nested Run.start does not inherit root lifecycle hooks.
+  const nativeRun=runtime.Runner.prototype.run;
+  runtime.Runner.prototype.run=function(source,runOptions,callback){
+    const raw=source.toJSON(),original=[home,...workspace].find(v=>v.info._postman_id===raw.info._postman_id)||raw;
+    return nativeRun.call(this,source,{...runOptions,script:{...runOptions.script,requestResolver:resolverFor(original)},requester:{...runOptions.requester}},(error,active)=>{
+      if(error)return callback(error);
+      active.options={...active.options};
+      let baseRequester;
+      const nativeStart=active.start;
+      active.start=function(callbacks){
+        return nativeStart.call(this,{...callbacks,
+          item(error,cursor,item,visualizer,...rest){
+            if(visualizer?.error)reportError(visualizer.error,cursor,item);
+            if(visualizer?.processedTemplate)send('visualizer',{itemId:item.id,html:visualizer.processedTemplate});
+            callbacks.item?.(error,cursor,item,visualizer,...rest);
+          },
+          beforeItem(error,cursor,item){
+            try{
+              if(!baseRequester){active.requester.options={...active.requester.options};baseRequester={...active.requester.options};}
+              const o=materializeNetwork({...options,...networkOf(findItem(original,item.id)?.item)});
+              if(o.caFile)permit(o.caFile);
+              for(const cert of o.certificates||[])for(const field of ['cert','key','pfx'])if(cert[field]?.src)permit(cert[field].src);
+              active.options.proxies=proxiesFor(o);active.options.certificates=new sdk.CertificateList({},o.certificates||[]);
+              Object.assign(active.requester.options,baseRequester,{timeout:o.requestTimeout,strictSSL:o.strictSSL!==false,followRedirects:o.followRedirects!==false,ignoreProxyEnvironmentVariables:true,extendedRootCA:o.caFile?fs.readFileSync(o.caFile):undefined});
+            }catch(problem){throw problem;}
+            callbacks.beforeItem?.(error,cursor,item);
+          },
+          beforeRequest(error,cursor,sent,item,aborter){
+            const problem=authProblem(sent.auth?.toJSON?.());
+            if(problem){reportError(new Error(problem),cursor,item);aborter.abort();return;}
+            callbacks.beforeRequest?.(error,cursor,sent,item,aborter);
+          }
+        });
+      };
+      callback(null,active);
+    });
+  };
   new runtime.Runner().run(c, config, (error, active) => {
     if (error) { reportError(error); return send('done',{status:'failed'}); }
-    let baseRequester;
-    const applyNetwork=id=>{
-      const o=networks[id]||options;
-      baseRequester||={...active.requester.options};
-      // Runner processes items serially. Reset each item, including auth replays;
-      // requester creation snapshots these options for that HTTP operation.
-      active.options.proxies=proxiesFor(o);
-      active.options.certificates=new sdk.CertificateList({},o.certificates||[]);
-      Object.assign(active.requester.options,baseRequester,{timeout:o.requestTimeout,strictSSL:o.strictSSL!==false,followRedirects:o.followRedirects!==false,ignoreProxyEnvironmentVariables:true,extendedRootCA:o.caFile?fs.readFileSync(o.caFile):undefined});
-    };
     active.start({
-      beforeItem(error,cursor,item) { applyNetwork(item.id); reportError(error,cursor,item); send('progress',{cursor,itemId:item.id,name:item.name}); },
-      beforeRequest(error,cursor,sent,item,aborter){
-        const problem=authProblem(sent.auth?.toJSON?.());
-        if(problem){reportError(new Error(problem),cursor,item);aborter.abort();}
-      },
+      beforeItem(error,cursor,item) { reportError(error,cursor,item); send('progress',{cursor,itemId:item.id,name:item.name}); },
       prerequest:scriptsDone, test:scriptsDone,
       exception(cursor,error) { reportError(error,cursor); },
       assertion(cursor,assertions) {

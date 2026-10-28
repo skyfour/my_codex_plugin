@@ -11,7 +11,10 @@ const options=z.object({
   proxy:z.string().optional(),noProxy:z.array(z.string()).optional(),proxyCredentials:z.array(object).optional(),caFile:z.string().optional(),certificates:z.array(object).optional(),allowedFiles:z.array(z.string()).optional(),
 }).strict();
 const oauthTarget=z.object({kind:z.enum(['environment','globals']),id,key:z.string().min(1).max(200)}).strict();
+const cookie=z.object({key:z.string().min(1).max(1024),value:z.string().max(65536),path:z.string().startsWith('/').max(2048),expires:z.string().optional(),hostOnly:z.boolean().optional(),secure:z.boolean().optional(),httpOnly:z.boolean().optional(),sameSite:z.enum(['strict','lax','none']).optional()}).strict();
 export const TOOL_DEFINITIONS = [
+  ['api_cookies_get','App 专用：显示所选域 Cookie 明文，模型工作区仍脱敏。',z.object({domain:z.string().min(1).max(253)}).strict(),'cookiesGet',true,'app'],
+  ['api_cookies_edit','App 专用：替换所选域 Cookie，空数组清空该域；保留其他域。',z.object({domain:z.string().min(1).max(253),revision,cookies:z.array(cookie).max(1000)}).strict(),'cookiesEdit',false,'app'],
   ['api_protocol_connect','显式连接保存的 SSE/WebSocket/Socket.IO/gRPC/MQTT/远程 MCP 请求。凭据仅在本机解析，不运行 pm.* 或 HTTP Runner。',z.object({collectionId:id,itemId:id,environmentId:id.optional()}).strict(),'protocolConnect',false],
   ['api_protocol_action','协议操作：WS send、Socket.IO emit；gRPC call/write/end/cancel；MQTT subscribe/unsubscribe/publish；MCP listTools/listResources/listPrompts/callTool/readResource/getPrompt/cancel。payload 为所选操作参数，事件始终脱敏。',z.object({sessionId:id,action:z.string().min(1).max(100),payload:z.unknown().optional()}).strict(),'protocolAction',false],
   ['api_protocol_events','读取有界脱敏事件；gap 表示游标之前的记录已淘汰。',z.object({sessionId:id,after:z.number().int().min(0).optional(),limit:z.number().int().min(1).max(1000).optional()}).strict(),'protocolEvents',true],

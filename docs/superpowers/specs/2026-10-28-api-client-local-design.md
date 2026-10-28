@@ -1,6 +1,6 @@
 # API Client 本地功能补齐与完整迁移设计
 
-状态：待用户批准；尚未开始实现。
+状态：已获用户批准；本地功能已实现，集成验证与边界见 `.superpowers/sdd/2026-10-28-api-client-local/task-6-report.md`。未发布或覆盖安装实例。
 
 ## 已确认的目标
 

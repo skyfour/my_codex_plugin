@@ -75,6 +75,9 @@ test('settings and Cookie editors retain their opening revision across backgroun
   await page.getByRole('button',{name:'保存设置',exact:true}).click();
   await expect(page.locator('.modal-error')).toBeVisible();
   await page.getByRole('button',{name:'管理 Cookie',exact:true}).click();
+  await page.getByLabel('Cookie 域筛选').fill('revision-cookie.test');
+  await page.getByRole('button',{name:'编辑此域',exact:true}).click();
+  await expect(page.getByRole('heading',{name:'revision-cookie.test'})).toBeVisible();
   await put('cookies',{cookies:[]});
   await page.waitForResponse(r=>r.url().endsWith('/api/api_workspace_state'));
   await page.getByRole('button',{name:'保存 Cookie',exact:true}).click();

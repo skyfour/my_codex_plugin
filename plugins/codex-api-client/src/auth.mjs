@@ -64,3 +64,17 @@ export function materializeNetwork(options){
  return copy;
 }
 export const networkOf=item=>item?.['x-codex-api-client']?.network||{};
+
+export function validateOptions(options) {
+  for(const key of ['strictSSL','followRedirects'])if(options[key]!==undefined&&typeof options[key]!=='boolean')throw new Error('NETWORK_INVALID: '+key+' 必须是布尔值');
+  if(options.noProxy!==undefined&&(!Array.isArray(options.noProxy)||options.noProxy.some(v=>typeof v!=='string')))throw new Error('NETWORK_INVALID: noProxy 需要匹配规则数组');
+  if(options.proxyCredentials!==undefined&&(!Array.isArray(options.proxyCredentials)||options.proxyCredentials.some(v=>!v||!['username','password'].includes(v.key))))throw new Error('NETWORK_INVALID: 代理凭据格式错误');
+
+  for(const [key,min,max]of [['requestTimeout',1,300000],['scriptTimeout',1,60000],['runTimeout',100,600000],['iterations',1,1000],['delay',0,60000],['maxResponseSize',1,20*1024*1024]]) {
+    if(options[key]!==undefined&&(!Number.isInteger(options[key])||options[key]<min||options[key]>max))throw new Error(`LIMIT: ${key} 必须是 ${min}–${max} 的整数`);
+  }
+  if(options.proxy){
+    if(!/^http:\/\//.test(options.proxy))throw new Error('PROXY: 首版仅支持 HTTP 代理 URL');
+    const proxy=new URL(options.proxy);if(proxy.username||proxy.password)throw new Error('PROXY: 凭据请使用专用密码字段');
+  }
+}
