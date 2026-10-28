@@ -29,21 +29,142 @@ function mergeSingleton(kind,local,backup,decisions,files){
  for(const v of backup[field])if(!seen.has(identity(v))){seen.add(identity(v));values.push(v);}
  return {...local,[field]:values};
 }
+// Only these Postman/network schema locations denote machine files. A business value
+// equal to a path or document ID must remain byte-for-byte unchanged.
+function visitAttachmentLocations(kind,data,map){
+ const field=(object,key)=>{if(!object||!(key in object))return;const value=object[key];if(Array.isArray(value))object[key]=value.map(v=>typeof v==='string'&&v?map(v):v);else if(typeof value==='string'&&value)object[key]=map(value);};
+ if(kind==='collection'){
+  const visit=node=>{
+   const body=node.request?.body;
+   if(body){field(body.file,'src');for(const part of body.formdata||[])if(part.type==='file')field(part,'src');}
+   for(const child of node.item||[])visit(child);
+  };visit(data);
+ }
+ if(kind==='settings'){
+  field(data,'caFile');
+  for(const certificate of data.certificates||[])for(const key of ['cert','key','pfx']){
+   if(certificate[key]&&typeof certificate[key]==='object')field(certificate[key],'src');else field(certificate,key);
+  }
+ }
+}
+function restoreDocumentData(document,paths,mapping){
+ const data=walk(document.data,v=>v);
+ visitAttachmentLocations(document.kind,data,path=>paths.get(path)||path);
+ if(document.kind==='settings'&&typeof data.selectedEnvironment==='string')data.selectedEnvironment=mapping.get(data.selectedEnvironment)||data.selectedEnvironment;
+ return data;
+}
+function restoreHistory(history,mapping,mode){
+ return history.map(original=>{
+  const run=structuredClone(original);
+  if(mode!=='replace')run.id=randomUUID();
+  for(const field of ['collectionId','environmentId'])if(typeof run[field]==='string')run[field]=mapping.get(run[field])||run[field];
+  return run;
+ });
+}
 export class BackupService {
  constructor(store){this.store=store;this.sessions=new Map();this.directory=join(store.directory,'backup-files');mkdirSync(this.directory,{recursive:true,mode:0o700});const rows=store.db.prepare('SELECT data FROM documents').all();for(const name of readdirSync(this.directory)){const path=join(this.directory,name);if(statSync(path).isDirectory()&&!rows.some(r=>r.data.includes(path)))rmSync(path,{recursive:true,force:true});}}
- async capture(includeHistory=false,context){const documents=[],files=[],paths=new Map();for(const row of this.store.db.prepare('SELECT * FROM documents').all()){const doc=await this.store.view(row,{reveal:true});documents.push({kind:row.kind,id:row.id,data:row.kind==='settings'?settings(doc.data):doc.data});}
- if(context){let doc=documents.find(d=>d.kind==='settings');if(!doc){doc={kind:'settings',id:'default',data:{}};documents.push(doc);}doc.data={...doc.data,...settings(context)};}
- const allowed=new Set((JSON.parse(this.store.row('settings','default')?.data||'{}').allowedFiles||[]).map(p=>resolve(p))),uploads=realpathSync(this.store.directory);
- const scan=value=>{if(Array.isArray(value))return value.forEach(scan);if(!value||typeof value!=='object')return;for(const [key,v]of Object.entries(value)){if(['src','caFile','cert','key','pfx'].includes(key)&&typeof v==='string'&&(v.startsWith('/')||v.includes('..'))){const path=realpathSync(v);if(!((path.startsWith(uploads+'/uploads/')||path.startsWith(uploads+'/backup-files/'))||allowed.has(path)))throw new Error('BACKUP_FILE_DENIED: 附件未被允许读取');if(!paths.has(path)){if(files.length>=1000||statSync(path).size>FILE_LIMIT)fail();const data=readFileSync(path),id=randomUUID();files.push({id,name:basename(path),sha256:createHash('sha256').update(data).digest('hex'),base64:data.toString('base64')});paths.set(path,'backup-file:'+id);}paths.set(v,paths.get(path));}else scan(v);}};documents.forEach(d=>scan(d.data));return {version:1,documents:walk(documents,v=>paths.get(v)||v),files,history:includeHistory?this.store.listRuns():[]};}
+ async capture(includeHistory=false,context){
+  const documents=[],files=[],paths=new Map();
+  for(const row of this.store.db.prepare('SELECT * FROM documents').all()){
+   const document=await this.store.view(row,{reveal:true});
+   documents.push({kind:row.kind,id:row.id,data:row.kind==='settings'?settings(document.data):document.data});
+  }
+  if(context){
+   let document=documents.find(d=>d.kind==='settings');
+   if(!document){document={kind:'settings',id:'default',data:{}};documents.push(document);}
+   document.data={...document.data,...settings(context)};
+  }
+  const allowed=new Set((JSON.parse(this.store.row('settings','default')?.data||'{}').allowedFiles||[]).map(p=>resolve(p)));
+  const root=realpathSync(this.store.directory);
+  const captureFile=original=>{
+   const path=realpathSync(original);
+   if(!(path.startsWith(root+'/uploads/')||path.startsWith(root+'/backup-files/')||allowed.has(path)))throw new Error('BACKUP_FILE_DENIED: 附件未被允许读取');
+   if(!paths.has(path)){
+    if(files.length>=1000||statSync(path).size>FILE_LIMIT)fail();
+    const data=readFileSync(path),id=randomUUID();
+    files.push({id,name:basename(path),sha256:createHash('sha256').update(data).digest('hex'),base64:data.toString('base64')});
+    paths.set(path,'backup-file:'+id);
+   }
+   return paths.get(path);
+  };
+  for(const document of documents)visitAttachmentLocations(document.kind,document.data,captureFile);
+  return {version:1,documents:walk(documents,v=>v),files,history:includeHistory?this.store.listRuns():[]};
+ }
  async export(password,includeHistory=false,context){return encryptArchive(await this.capture(includeHistory,context),password);}
  async preview(bytes,password,mode='merge',context){const archive=decryptArchive(bytes,password);this.validate(archive);const transferId=randomUUID();this.sessions.set(transferId,{archive,password,mode,context,touched:Date.now()});const counts=kind=>archive.documents.filter(d=>d.kind===kind).length;return {transferId,collectionCount:counts('collection'),environmentCount:counts('environment'),credentialCount:JSON.stringify(archive).match(/"type":"secret"/g)?.length||0,fileCount:archive.files.length,cookieCount:archive.documents.find(d=>d.kind==='cookies')?.data.cookies?.length||0,conflicts:(await Promise.all(archive.documents.filter(d=>['globals','settings','cookies'].includes(d.kind)&&this.store.row(d.kind,'default')).map(async d=>conflictRows(d.kind,(await this.store.get(d.kind,'default',{reveal:true})).data,d.data)))).flat(),mode};}
- validate(a){if(a.version!==1||!Array.isArray(a.documents)||a.documents.length>5000||!Array.isArray(a.files)||a.files.length>1000)fail();const ids=new Set(),referenced=new Set();for(const f of a.files){if(!/^[\da-f-]{36}$/.test(f.id)||ids.has(f.id)||typeof f.name!=='string'||f.name!==basename(f.name)||f.name==='..'||f.name.includes('\\'))fail();ids.add(f.id);const b=Buffer.from(f.base64,'base64');if(b.length>FILE_LIMIT||createHash('sha256').update(b).digest('hex')!==f.sha256)fail();}for(const d of a.documents){if(typeof d.id!=='string'||!d.id||d.id.length>200)fail();if(!['collection','environment','globals','settings','cookies'].includes(d.kind)||!d.data||typeof d.data!=='object')fail();const scan=(obj)=>{if(!obj||typeof obj!=='object')return;for(const [k,v]of Object.entries(obj)){if(['src','caFile','cert','pfx'].includes(k)&&typeof v==='string'&&v&&!v.startsWith('backup-file:'))fail();if(k==='key'&&typeof v==='string'&&(v.startsWith('/')||v.includes('..')))fail();scan(v);}};scan(d.data);walk(d.data,v=>{if(v.startsWith('backup-file:')){if(!ids.has(v.slice(12)))fail();referenced.add(v.slice(12));}return v;});}if(ids.size!==referenced.size)fail(); }
- async restore(id,decisions={}){const session=this.sessions.get(id);if(!session||Date.now()-session.touched>900000)fail();const {archive,mode,password,context}=session;this.validate(archive);const folder=join(this.directory,randomUUID());mkdirSync(folder,{mode:0o700});const paths=new Map();let snapshot;
- try{if(mode==='replace'){snapshot=await this.export(password,true,context);writeFileSync(join(this.directory,'recovery-'+Date.now()+'.backup'),snapshot,{mode:0o600});}
- for(const f of archive.files){const path=join(folder,f.id);writeFileSync(path,Buffer.from(f.base64,'base64'),{mode:0o600});paths.set('backup-file:'+f.id,path);}
- const names={collection:new Set((await this.store.list('collection')).map(d=>d.data.info?.name)),environment:new Set((await this.store.list('environment')).map(d=>d.data.name))};const entries=[],mapping=new Map(archive.documents.filter(d=>['collection','environment'].includes(d.kind)).map(d=>[d.id,mode==='replace'?d.id:randomUUID()]));for(const d of archive.documents){let data=walk(d.data,v=>paths.get(v)||mapping.get(v)||v),id=mapping.get(d.id)||'default',live=this.store.row(d.kind,id);if(mode!=='replace'&&d.kind==='collection')data.info.name=uniqueName(data.info.name,names.collection);if(mode!=='replace'&&d.kind==='environment')data.name=uniqueName(data.name,names.environment);if(d.kind==='settings')data={...settings(data),allowedFiles:[...paths.values()]};if(mode!=='replace'&&['globals','settings','cookies'].includes(d.kind)&&live){const local=(await this.store.get(d.kind,id,{reveal:true})).data;data=mergeSingleton(d.kind,local,data,decisions,paths.values());}entries.push({kind:d.kind,id,data,expectedRevision:live?.revision||0});}
- if(paths.size&&!entries.some(d=>d.kind==='settings')){const live=await this.store.get('settings','default',{reveal:true});entries.push({kind:'settings',id:'default',data:{...live?.data,allowedFiles:[...new Set([...(live?.data.allowedFiles||[]),...paths.values()])]},expectedRevision:live?.revision||0});}
- await this.store.putMany(entries,{replace:mode==='replace',history:archive.history||[]});this.sessions.delete(id);return {restored:true,documentCount:entries.length,snapshotCreated:!!snapshot,snapshot};
- }catch(error){rmSync(folder,{recursive:true,force:true});throw error;}}
+ validate(archive){
+  if(archive.version!==1||!Array.isArray(archive.documents)||archive.documents.length>5000||!Array.isArray(archive.files)||archive.files.length>1000)fail();
+  const ids=new Set(),referenced=new Set();
+  for(const file of archive.files){
+   if(!/^[\da-f-]{36}$/.test(file.id)||ids.has(file.id)||typeof file.name!=='string'||file.name!==basename(file.name)||file.name==='..'||file.name.includes('\\'))fail();
+   ids.add(file.id);
+   const bytes=Buffer.from(file.base64,'base64');
+   if(bytes.length>FILE_LIMIT||createHash('sha256').update(bytes).digest('hex')!==file.sha256)fail();
+  }
+  for(const document of archive.documents){
+   if(typeof document.id!=='string'||!document.id||document.id.length>200)fail();
+   if(!['collection','environment','globals','settings','cookies'].includes(document.kind)||!document.data||typeof document.data!=='object')fail();
+   visitAttachmentLocations(document.kind,document.data,path=>{
+    if(!path.startsWith('backup-file:')||!ids.has(path.slice(12)))fail();
+    referenced.add(path.slice(12));return path;
+   });
+  }
+  if(ids.size!==referenced.size)fail();
+ }
+ async restore(id,decisions={}){
+  const session=this.sessions.get(id);
+  if(!session||Date.now()-session.touched>900000)fail();
+  const {archive,mode,password,context}=session;
+  this.validate(archive);
+  // This identity precedes both snapshot capture and any asynchronous secret preparation.
+  // Store verifies it under BEGIN IMMEDIATE before replacement can delete a row.
+  const expectedWorkspaceIdentity=mode==='replace'?this.store.workspaceIdentity():undefined;
+  const folder=join(this.directory,randomUUID()),paths=new Map();
+  mkdirSync(folder,{mode:0o700});
+  let snapshot,snapshotPath;
+  try{
+   if(mode==='replace'){
+    snapshot=await this.export(password,true,context);
+    snapshotPath=join(this.directory,'recovery-'+randomUUID()+'.backup');
+    writeFileSync(snapshotPath,snapshot,{mode:0o600});
+   }
+   for(const file of archive.files){
+    const path=join(folder,file.id);
+    writeFileSync(path,Buffer.from(file.base64,'base64'),{mode:0o600});
+    paths.set('backup-file:'+file.id,path);
+   }
+   const names={
+    collection:new Set((await this.store.list('collection')).map(d=>d.data.info?.name)),
+    environment:new Set((await this.store.list('environment')).map(d=>d.data.name)),
+   };
+   const mapping=new Map(archive.documents.filter(d=>['collection','environment'].includes(d.kind)).map(d=>[d.id,mode==='replace'?d.id:randomUUID()]));
+   const entries=[];
+   for(const document of archive.documents){
+    const {kind}=document,id=mapping.get(document.id)||'default';
+    let data=restoreDocumentData(document,paths,mapping);
+    const live=this.store.row(kind,id);
+    if(mode!=='replace'&&kind==='collection')data.info.name=uniqueName(data.info.name,names.collection);
+    if(mode!=='replace'&&kind==='environment')data.name=uniqueName(data.name,names.environment);
+    if(kind==='settings')data={...settings(data),allowedFiles:[...paths.values()]};
+    if(mode!=='replace'&&['globals','settings','cookies'].includes(kind)&&live){
+     const local=(await this.store.get(kind,id,{reveal:true})).data;
+     data=mergeSingleton(kind,local,data,decisions,paths.values());
+    }
+    entries.push({kind,id,data,expectedRevision:live?.revision||0});
+   }
+   if(paths.size&&!entries.some(d=>d.kind==='settings')){
+    const live=await this.store.get('settings','default',{reveal:true});
+    entries.push({kind:'settings',id:'default',data:{...live?.data,allowedFiles:[...new Set([...(live?.data.allowedFiles||[]),...paths.values()])]},expectedRevision:live?.revision||0});
+   }
+   const history=restoreHistory(archive.history||[],mapping,mode);
+   await this.store.putMany(entries,{replace:mode==='replace',history,expectedWorkspaceIdentity});
+   this.sessions.delete(id);
+   return {restored:true,documentCount:entries.length,snapshotCreated:!!snapshot,snapshot};
+  }catch(error){
+   rmSync(folder,{recursive:true,force:true});
+   if(snapshotPath)rmSync(snapshotPath,{force:true});
+   throw error;
+  }
+ }
  close(){this.sessions.clear();}
 }

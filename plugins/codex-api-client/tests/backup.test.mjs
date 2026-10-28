@@ -48,3 +48,31 @@ test('conflicts expose masked individual rows and choices restore only selected 
  const cookies=(await b.get('cookies','default',{reveal:true})).data.cookies;assert.equal(cookies.length,2);assert.equal(cookies.find(c=>c.key==='first').value,'backup-first');assert.equal(cookies.find(c=>c.key==='second').value,'local-second');
  const settings=(await b.get('settings','default')).data;assert.equal(settings.requestTimeout,111);assert.equal(settings.followRedirects,false);assert.equal(settings.ui.theme,'dark');
 }));
+import {ApiService} from '../src/service.mjs';
+test('ordinary workspace and document exports sanitize standard API key value only',()=>isolated(async(a)=>{
+ const service=new ApiService(a);await service.put({kind:'collection',id:'api-key',revision:0,data:{info:{name:'key test'},auth:{type:'apikey',apikey:[{key:'key',value:'X-Custom-Key'},{key:'value',value:'synthetic-api-secret'},{key:'in',value:'header'}]},item:[]}});
+ for(const result of [await service.exportWorkspace(),await service.export({kind:'collection',id:'api-key'})]){const auth=(result.data.collections?.[0]||result.data).auth;assert.equal(auth.apikey.find(v=>v.key==='value').value,'');assert.equal(auth.apikey.find(v=>v.key==='key').value,'X-Custom-Key');assert.equal(auth.apikey.find(v=>v.key==='in').value,'header');assert(!JSON.stringify(result).includes('synthetic-api-secret'));}await service.close();
+}));
+test('restore remaps only schema references and attachment locations, preserving equal business strings',()=>isolated(async(a,b)=>{
+ await mkdir(join(a.directory,'uploads'));const path=join(a.directory,'uploads','fixture');await writeFile(path,'fixture');
+ await a.put('environment','dev',{name:'dev',values:[{key:'dev',value:'dev'},{key:'secret',type:'secret',value:'dev'},{key:'attachmentBusiness',value:path}]},0);
+ await a.put('collection','collection',{info:{name:'dev'},item:[{id:'dev',name:'dev',request:{url:'https://invalid.test',method:'POST',header:[{key:'dev',value:path}],auth:{type:'basic',basic:[{key:'password',value:'dev'}]},body:{mode:'file',file:{src:path},raw:'dev'}}}]},0);
+ await a.put('settings','default',{selectedEnvironment:'dev'},0);const source=new BackupService(a),target=new BackupService(b);await target.restore((await target.preview(await source.export('p'),'p')).transferId);
+ const env=(await b.list('environment'))[0],data=(await b.get('environment',env.id,{reveal:true})).data;assert.notEqual(env.id,'dev');assert.equal(data.name,'dev');assert.equal(data.values[0].key,'dev');assert.equal(data.values[0].value,'dev');assert.equal(data.values[1].value,'dev');assert.equal(data.values[2].value,path);assert.equal((await b.get('settings','default')).data.selectedEnvironment,env.id);
+ const item=(await b.list('collection'))[0].data.item[0];assert.equal(item.id,'dev');assert.equal(item.name,'dev');assert.equal(item.request.body.raw,'dev');assert.equal(item.request.header[0].value,path);assert.equal(item.request.auth.basic[0].value,'dev');assert.notEqual(item.request.body.file.src,path);
+}));
+test('history merge assigns fresh run IDs and remaps collection/environment references',()=>isolated(async(a,b)=>{
+ for(const store of [a,b]){await store.put('collection','same',{info:{name:'collection'},item:[]},0);await store.put('environment','dev',{name:'environment',values:[]},0);}
+ const run={id:'same-run',collectionId:'same',environmentId:'dev',status:'completed',responses:[],assertions:[],errors:[],logs:[],name:'backup-run'};a.saveRun(run);b.saveRun({...run,name:'local-run'});
+ const source=new BackupService(a),target=new BackupService(b);await target.restore((await target.preview(await source.export('p',true),'p')).transferId);assert.equal(b.getRun('same-run').name,'local-run');const restored=b.listRuns().find(r=>r.name==='backup-run');assert(restored);assert.notEqual(restored.id,'same-run');assert.notEqual(restored.collectionId,'same');assert.notEqual(restored.environmentId,'dev');assert(b.row('collection',restored.collectionId));assert(b.row('environment',restored.environmentId));
+}));
+test('replacement rejects workspace changes accepted during delayed Keychain preparation',()=>isolated(async(a,b)=>{
+ await a.put('environment','incoming',{name:'incoming',values:[{key:'secret',type:'secret',value:'synthetic'}]},0);await b.put('settings','default',{requestTimeout:1000},0);
+ const source=new BackupService(a),target=new BackupService(b),preview=await target.preview(await source.export('p'),'p','replace');let release,entered;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r),set=b.secrets.set.bind(b.secrets);b.secrets.set=async(k,v)=>{entered();await gate;await set(k,v);};
+ const restoring=target.restore(preview.transferId);await started;await b.put('environment','concurrent',{name:'accepted concurrent change',values:[]},0);release();await assert.rejects(restoring,/CONFLICT/);assert(b.row('environment','concurrent'));assert.equal((await b.get('settings','default')).data.requestTimeout,1000);assert.equal(b.row('environment','incoming'),undefined);assert.equal(b.secrets.values.size,0);
+}));
+test('replacement rejects history accepted while the recovery snapshot is being captured',()=>isolated(async(a,b)=>{
+ await a.put('environment','incoming',{name:'incoming',values:[]},0);await b.put('environment','existing',{name:'existing',values:[{key:'secret',type:'secret',value:'original-secret'}]},0);b.saveRun({id:'local-run',name:'before'});
+ const source=new BackupService(a),target=new BackupService(b),preview=await target.preview(await source.export('p'),'p','replace');let release,entered;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r),get=b.secrets.get.bind(b.secrets);b.secrets.get=async k=>{entered();await gate;return get(k);};
+ const restoring=target.restore(preview.transferId);await started;b.saveRun({id:'local-run',name:'accepted during snapshot'});release();await assert.rejects(restoring,/CONFLICT/);assert.equal(b.getRun('local-run').name,'accepted during snapshot');assert(b.row('environment','existing'));assert.equal(b.row('environment','incoming'),undefined);assert.equal(b.secrets.values.size,1);
+}));
