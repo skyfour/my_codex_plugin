@@ -21,6 +21,8 @@ export function authProblem(auth){
  const p=Object.fromEntries((auth[auth.type]||[]).filter(v=>!v.disabled).map(v=>[v.key,v.value]));
  if(auth.type==='asap'){
   let claims=p.claims||{};
+  // Whole-field variables are parsed after runtime resolution at beforeRequest.
+  if(typeof claims==='string'&&/^\s*{{[^{}]+}}\s*$/.test(claims))claims={};
   if(typeof claims==='string'){try{claims=claims.trim()&&JSON.parse(claims.trim());}catch{return 'AUTH_INVALID: ASAP claims JSON 无效';}}
   if(claims===null)return 'AUTH_INVALID: ASAP claims 无效';
   // Native ASAP gives truthy claims values precedence over top-level fields.

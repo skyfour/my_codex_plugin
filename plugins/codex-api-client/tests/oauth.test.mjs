@@ -68,3 +68,18 @@ test('native ASAP signs effective object and JSON claims before top-level values
  assert.equal(tokens.length,4);for(const token of tokens){const verified=await jwtVerify(token,pair.publicKey,{issuer:claims.iss,audience:claims.aud});assert.equal(verified.protectedHeader.kid,claims.kid);}
  const {authProblem}=await import('../src/auth.mjs');for(const claims of ['{secret-not-json',JSON.stringify({kid:'secret-but-missing-issuer'})]){const error=authProblem({type:'asap',asap:[{key:'claims',value:claims},{key:'privateKey',value:privateKey}]});assert.ok(error);assert.doesNotMatch(error,/secret-not-json|secret-but-missing-issuer|PRIVATE KEY/);}
 });
+test('ASAP whole-field variable claims pass preflight and sign resolved native requests',async t=>{
+ const {authProblem}=await import('../src/auth.mjs'),{warningsFor}=await import('../src/formats.mjs'),{generateKeyPairSync}=await import('node:crypto'),{jwtVerify}=await import('jose');
+ const pair=generateKeyPairSync('rsa',{modulusLength:2048}),privateKey=pair.privateKey.export({type:'pkcs8',format:'pem'}),{service}=await setup(t),tokens=[];
+ const server=http.createServer((req,res)=>{tokens.push(req.headers.authorization.slice(7));res.end('ok');});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
+ const auth={type:'asap',asap:[{key:'claims',value:'{{claims}}'},{key:'kid',value:'top-key'},{key:'iss',value:'top-issuer'},{key:'aud',value:'top-audience'},{key:'privateKey',value:privateKey}]};
+ assert.equal(authProblem(auth),'');assert.deepEqual(warningsFor({auth}),[]);
+ const claims={kid:'variable-key',iss:'variable-issuer',aud:'variable-audience'};
+ await service.put({kind:'environment',id:'env',revision:(await service.get({kind:'environment',id:'env'})).revision,data:{name:'claims',values:[{key:'claims',value:JSON.stringify(claims)}]}});
+ const doc=await service.put({kind:'collection',data:{info:{name:'variable ASAP'},item:[{name:'signed',request:{url:`http://127.0.0.1:${server.address().port}`,auth}}]}});
+ const run=await service.start({collectionId:doc.id,environmentId:'env'});await service.active.get(run.runId).completion;const result=await service.result({runId:run.runId});assert.equal(result.status,'completed',JSON.stringify(result.errors));assert.equal(tokens.length,1);
+ const verified=await jwtVerify(tokens[0],pair.publicKey,{issuer:claims.iss,audience:claims.aud});assert.equal(verified.protectedHeader.kid,claims.kid);
+ const malformed={...auth,asap:auth.asap.map(v=>v.key==='claims'?{...v,value:'secret-malformed-json'}:v)};assert.equal(authProblem(malformed),'AUTH_INVALID: ASAP claims JSON 无效');
+ await service.put({kind:'environment',id:'env',revision:(await service.get({kind:'environment',id:'env'})).revision,data:{name:'bad claims',values:[{key:'claims',value:'secret-malformed-json'}]}});
+ const invalid=await service.start({collectionId:doc.id,environmentId:'env'});await service.active.get(invalid.runId).completion;const failed=await service.result({runId:invalid.runId});assert.ok(failed.errors.some(e=>JSON.stringify(e).includes('AUTH_INVALID: ASAP claims JSON 无效')));assert.doesNotMatch(JSON.stringify(failed.errors),/secret-malformed-json/);assert.equal(tokens.length,1);
+});
