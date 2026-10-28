@@ -29,7 +29,10 @@
     "codemirror": "^6.0.0",
     "@codemirror/lang-javascript": "^6.0.0",
     "@codemirror/lang-json": "^6.0.0",
-    "@codemirror/theme-one-dark": "^6.0.0"
+    "@codemirror/theme-one-dark": "^6.0.0",
+    "openapi-to-postmanv2": "6.4.2",
+    "yaml": "2.9.1",
+    "@codemirror/autocomplete": "6.20.4"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

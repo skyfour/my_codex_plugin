@@ -28,7 +28,7 @@ npm run install:api-client
 
 ## 支持范围
 
-支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key、cURL/Postman 导入导出、JSON/CSV 数据迭代和取消运行。当前不支持 OAuth 授权窗口、其他协议、Vault 或云脚本包。
+支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key、cURL/Postman、OpenAPI3/Swagger2 JSON/YAML、HAR 导入和 GraphQL、JSON/CSV 数据迭代和取消运行。当前不支持 OAuth 授权窗口、GraphQL 以外的其他协议、Vault 或云脚本包。
 
 ## 快速操作
 
@@ -78,3 +78,19 @@ JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；
 在插件目录执行 `npm ci`、`npm run build`、`npm test`、`npm run check`。`npm run dev` 在 `127.0.0.1:47890` 提供独立预览。浏览器验证使用 `npm exec playwright -- test --config playwright.tree.config.ts`，需要 Chrome。
 
 完整界面与易用性回归使用 `npm exec playwright -- test --config playwright.usability.config.ts`；先执行 `npm run build`，确保预览加载最新界面。
+
+## 兼容模式与规范导入
+
+标准新建集合和普通 Postman/OpenAPI/HAR/cURL 导入默认严格模式：local > data > environment > collection > global；文件夹变量不进入运行作用域。既有未标记且包含文件夹变量的本地集合和 v1 工作区备份保留扩展行为；文件夹变量通过临时作用域覆盖运行数据。可在集合概览切换模式，配置保存在 `x-codex-api-client.compatibilityMode`（`strict` / `extended`），其余扩展字段、请求 ID、认证和未编辑的 body 元信息保留。单条请求发送忽略 `setNextRequest`，集合 Runner 保留跳转语义。
+
+`api_import_preview` 和 `api_import` 的原 `text` 参数继续有效，新增可选 `localFiles: {相对文件名: 文件文本}`。支持 OpenAPI 3.0/3.1、Swagger 2.0 的 JSON/YAML，经官方 `openapi-to-postmanv2@6.4.2` 转为请求模板；HAR 导入 URL、重复 Header、Cookie、原始文本或表单请求体。预览显示请求数量、地址、认证类型和未支持项。HAR 响应/时序不导入，缺少文件内容的 HAR 上传拒绝；OpenAPI 回调、Webhook、链接与响应校验不自动执行，示例/变量及认证需检查。
+
+规范导入只处理所选主文件和明确提供的依赖。UI 支持多个依赖文件或选择依赖目录；目录相对路径以所选目录为根。远程 `$ref`、绝对路径、越界引用、不存在的本地引用、外部文件循环引用均拒绝；不会自动读取文件系统或访问网络。依赖总计不超过 20 MB、100 个文件，展开限制 100000 节点及 100 层。递归的主文件内部 schema 引用由官方转换器处理。
+
+cURL 额外支持 `-G/--get`、`--data-urlencode`、`-A/--user-agent`、`-e/--referer` 以及常见短参数紧接值。保留无 shell 执行原则；文件 URL 编码、代理、重试、`--insecure`、`--location`、`--compressed` 等不能保真选项明确拒绝，避免静默改变传输行为。
+
+## GraphQL
+
+在请求体类型选择 GraphQL，编辑 query、JSON variables 和 operationName。保存/导入/导出仍使用 Postman `body.mode=graphql`；发送、脚本、断言、环境、继承认证、Cookie 和网络设置沿用 HTTP Runner。GraphQL cURL 导出为 JSON 请求体，变量 JSON 无效时拒绝导出。
+
+点击「发送 Schema introspection」后才实际访问目标，打开页面不会发送。该操作先保存草稿，再通过 `api_graphql_introspect({collectionId,itemId,environmentId?})` 使用既有 HTTP 运行链返回 runId；使用 `api_run_result` 轮询并可通过 `api_run_cancel` 取消。保存请求的 body 不改变，但原有脚本照常执行，可能写入环境等作用域。成功后选择 schema 类型，在查询中输入字段前缀或 Ctrl+Space 使用实际字段补全；服务端禁用 introspection、GraphQL 错误或 HTTP 错误会明确提示。

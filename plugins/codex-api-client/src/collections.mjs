@@ -1,5 +1,12 @@
 const uuid = () => globalThis.crypto.randomUUID();
-export function normalizeCollection(input) {
+export function compatibilityMode(input) {
+  const explicit=input['x-codex-api-client']?.compatibilityMode;
+  if(explicit!==undefined&&!['strict','extended'].includes(explicit))throw new Error('COMPATIBILITY: 无效兼容模式');
+  if(explicit)return explicit;
+  const hasFolder=root=>(root.item||[]).some(item=>item.item&&((item.variable||[]).length||hasFolder(item)));
+  return hasFolder(input)?'extended':'strict';
+}
+export function normalizeCollection(input,{imported=false}={}) {
   const c = structuredClone(input);
   c.info = { ...c.info, _postman_id: c.info?._postman_id || uuid(), schema: 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json' };
   const seen = new Set();
@@ -7,7 +14,7 @@ export function normalizeCollection(input) {
     if (!item.id || seen.has(item.id)) item.id = uuid();
     seen.add(item.id); visit(item);
   });
-  c.item ||= []; visit(c); return c;
+  c.item ||= []; visit(c); c['x-codex-api-client']={...c['x-codex-api-client'],compatibilityMode:imported&&!c['x-codex-api-client']?.compatibilityMode?'strict':compatibilityMode(c)}; return c;
 }
 export function findItem(root, id, parents = []) {
   for (const [index, item] of (root.item || []).entries()) {

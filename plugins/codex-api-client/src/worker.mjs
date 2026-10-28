@@ -1,3 +1,4 @@
+import {compatibilityMode} from './collections.mjs';
 import runtime from 'postman-runtime';
 import sdk from 'postman-collection';
 import request from 'postman-request';
@@ -22,7 +23,7 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
     const scope=root.item&&root!==collection?[...inherited,...(root.variable||[])]:inherited;
     for(const item of root.item||[])if(item.item)visitScopes(item,scope);else folderScopes[item.id]=scope;
   };
-  visitScopes(collection);
+  if(compatibilityMode(collection)==='extended')visitScopes(collection);
   if(Object.values(folderScopes).some(v=>v.length)){
     collection=structuredClone(collection);
     collection.event=[{listen:'prerequest',script:{type:'text/javascript',exec:[
@@ -70,6 +71,7 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
     }
   };
   const config = {
+    disableSNR: options.singleRequest === true,
     timeout: { request: options.requestTimeout ?? 30000, script: options.scriptTimeout ?? 5000 },
     environment: env, globals: globalScope,
     data, iterationCount: options.iterations ?? Math.max(1,data.length),

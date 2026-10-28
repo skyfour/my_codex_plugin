@@ -41,15 +41,15 @@ export class ApiService {
     return this.store.put(kind,id,data,revision);
   }
   async remove({kind,id,revision}) { assertKind(kind); return this.store.remove(kind,id,revision); }
-  async import({text}) {
-    const {kind,data,warnings}=importDocument(text);
+  async import({text,localFiles}) {
+    const {kind,data,warnings}=await importDocument(text,{localFiles});
     if(kind==='workspace')return this.importWorkspace(data);
     return {document:await this.put({kind,data}),warnings};
   }
-  async previewImport({text}) {
-    const imported=importDocument(text);
+  async previewImport({text,localFiles}) {
+    const imported=await importDocument(text,{localFiles});
     if(imported.kind==='workspace')return {...workspacePreview(imported.data),warnings:imported.warnings};
-    return {kind:imported.kind,collectionCount:imported.kind==='collection'?1:0,environmentCount:imported.kind==='environment'?1:0,warnings:imported.warnings};
+    return {kind:imported.kind,collectionCount:imported.kind==='collection'?1:0,environmentCount:imported.kind==='environment'?1:0,warnings:imported.warnings,...(imported.kind==='collection'?collectionPreview(imported.data):{})};
   }
   async exportWorkspace() {
     const collections=await this.store.list('collection'),environments=await this.store.list('environment');
@@ -122,7 +122,10 @@ export class ApiService {
     name=basename(name);const path=join(directory,randomUUID()+'-'+name.replace(/[^\p{L}\p{N}._-]/gu,'_'));
     await writeFile(path,bytes,{mode:0o600});return {path,name,size:bytes.length};
   }
-  async start({collectionId,itemId,environmentId,data=[],dataText,dataFormat='json',options={}}) {
+  async graphqlIntrospect({collectionId,itemId,environmentId}) {
+    return this.start({collectionId,itemId,environmentId},true);
+  }
+  async start({collectionId,itemId,environmentId,data=[],dataText,dataFormat='json',options={}},introspect=false) {
     const settings=(await this.store.get('settings','default'))?.data||{};
     options={...DEFAULT_SETTINGS,...settings,...options};validateOptions(options);
     if(this.active.size>=4)throw new Error('RUN_LIMIT: 同时最多运行 4 个集合');
@@ -132,6 +135,12 @@ export class ApiService {
     const globalsDoc=await this.store.get('globals','default',{reveal:true});
     const cookiesDoc=await this.store.get('cookies','default',{reveal:true});
     const collection=selectCollection(collectionDoc.data,itemId), warnings=warningsFor(collection);
+    options.singleRequest=!!(itemId&&findItem(collectionDoc.data,itemId)?.item.request);
+    if(introspect){
+      const item=findItem(collection,itemId)?.item;
+      if(!item?.request||item.request.body?.mode!=='graphql')throw new Error('GRAPHQL: 请先选择并保存 GraphQL 请求');
+      item.request={...item.request,method:'POST',body:{mode:'graphql',graphql:{query:INTROSPECTION_QUERY,variables:'{}',operationName:'IntrospectionQuery'}}};
+    }
     if(warnings.length)throw new Error('UNSUPPORTED: '+warnings.join('；'));
     if(dataText!==undefined)data=parseData(dataText,dataFormat);
     if(!Array.isArray(data)||data.some(row=>!row||typeof row!=='object'||Array.isArray(row)))throw new Error('DATA: 需要对象数组');
@@ -249,3 +258,13 @@ export function validateOptions(options) {
     const proxy=new URL(options.proxy);if(proxy.username||proxy.password)throw new Error('PROXY: 首版不支持带凭据的代理 URL');
   }
 }
+
+function collectionPreview(data){const requests=root=>(root.item||[]).flatMap(i=>i.item?requests(i):[i.request]);const all=requests(data);const auths=root=>[root.auth?.type,root.request?.auth?.type,...(root.item||[]).flatMap(auths)].filter(Boolean);return {requestCount:all.length,collections:[{name:data.info.name,requestCount:all.length}],servers:[...new Set(all.map(r=>(typeof r?.url==='string'?r.url:r?.url?.raw||'').replace(/\{\{([^}]+)\}\}/g,(match,key)=>data.variable?.find(v=>v.key===key&&!v.disabled)?.value??match)))].slice(0,20),auth:[...new Set(auths(data))]};}
+
+const INTROSPECTION_QUERY=`query IntrospectionQuery {
+ __schema { queryType { name } mutationType { name } subscriptionType { name }
+ types { kind name description fields(includeDeprecated: true) { name description args { name description type { ...TypeRef } } type { ...TypeRef } } inputFields { name type { ...TypeRef } } enumValues { name } }
+ }
+}
+fragment TypeRef on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } } } }
+`;

@@ -204,6 +204,9 @@ test('top-left environment picker switches request values, previews variables an
 
 test('environment creation, globals, sensitive preview, deletion and narrow dark layout work',async({page})=>{
   await page.goto('http://127.0.0.1:47891');
+  // Globals imported/restored through the public API may omit their optional name.
+  await page.evaluate(async()=>{const token=(window as any).__DEV_TOKEN__,headers={'Content-Type':'application/json','X-API-Token':token};const state=await (await fetch('/api/api_workspace_state',{method:'POST',headers,body:'{}'})).json();const response=await fetch('/api/api_document_put',{method:'POST',headers,body:JSON.stringify({kind:'globals',revision:state.globals?.revision||0,data:{values:[]}})});if(!response.ok)throw Error('Cannot prepare unnamed globals fixture');});
+  await page.getByLabel('刷新工作区').click();
   await page.getByRole('button',{name:'选择环境',exact:true}).click();
   await page.getByRole('button',{name:'＋ 新建环境',exact:true}).click();
   await expect(page.getByRole('button',{name:'选择环境',exact:true})).toContainText('新环境');
