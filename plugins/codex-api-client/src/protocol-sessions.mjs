@@ -19,9 +19,10 @@ export class ProtocolSessions {
  }
  emit(s,type,data){
   if(['closed','failed'].includes(s.state)&&type!=='state')return;
+  const binarySecrets=s.secrets.filter(v=>Buffer.isBuffer(v)||v instanceof Uint8Array).map(v=>Buffer.from(v)).filter(v=>v.length);
   const secrets=s.secrets.filter(Boolean).map(String);
-  const needles=[...new Set(secrets.flatMap(v=>[v,Buffer.from(v).toString('base64'),Buffer.from(v).toString('hex'),encodeURIComponent(v)]))].sort((a,b)=>b.length-a.length);
-  const byteNeedles=needles.map(v=>Buffer.from(v));
+  const needles=[...new Set([...secrets.flatMap(v=>[v,Buffer.from(v).toString('base64'),Buffer.from(v).toString('hex'),encodeURIComponent(v)]),...binarySecrets.flatMap(v=>[v.toString('base64'),v.toString('hex')])])].sort((a,b)=>b.length-a.length);
+  const byteNeedles=[...binarySecrets,...needles.map(v=>Buffer.from(v))].sort((a,b)=>b.length-a.length);
   // Search original bytes only: inserted markers may themselves contain a secret.
   const cleanBinary=value=>{const original=Buffer.from(value),parts=[];let cursor=0;while(cursor<original.length){let next=-1,matched;for(const needle of byteNeedles){const at=original.indexOf(needle,cursor);if(at>=0&&(next<0||at<next)){next=at;matched=needle;}}if(next<0){parts.push(original.subarray(cursor));break;}parts.push(original.subarray(cursor,next),Buffer.from('[REDACTED]'));cursor=next+matched.length;}return Buffer.concat(parts);};
   const visit=v=>{if(Buffer.isBuffer(v)||v instanceof Uint8Array){const b=cleanBinary(v);return {encoding:'base64',base64:b.toString('base64'),size:b.length};}if(typeof v==='string')return redact(v,needles);if(Array.isArray(v))return v.map(visit);if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,visit(x)]));return v;};

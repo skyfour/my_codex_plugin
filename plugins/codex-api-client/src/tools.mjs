@@ -12,8 +12,8 @@ const options=z.object({
 }).strict();
 const oauthTarget=z.object({kind:z.enum(['environment','globals']),id,key:z.string().min(1).max(200)}).strict();
 export const TOOL_DEFINITIONS = [
-  ['api_protocol_connect','显式连接保存的 SSE/WebSocket/Socket.IO 请求。凭据仅在本机解析，不运行 pm.* 或 HTTP Runner。',z.object({collectionId:id,itemId:id,environmentId:id.optional()}).strict(),'protocolConnect',false],
-  ['api_protocol_action','发送文本/二进制或 Socket.IO emit，事件始终脱敏。',z.object({sessionId:id,action:z.string().min(1).max(100),payload:z.unknown().optional()}).strict(),'protocolAction',false],
+  ['api_protocol_connect','显式连接保存的 SSE/WebSocket/Socket.IO/gRPC/MQTT/远程 MCP 请求。凭据仅在本机解析，不运行 pm.* 或 HTTP Runner。',z.object({collectionId:id,itemId:id,environmentId:id.optional()}).strict(),'protocolConnect',false],
+  ['api_protocol_action','协议操作：WS send、Socket.IO emit；gRPC call/write/end/cancel；MQTT subscribe/unsubscribe/publish；MCP listTools/listResources/listPrompts/callTool/readResource/getPrompt/cancel。payload 为所选操作参数，事件始终脱敏。',z.object({sessionId:id,action:z.string().min(1).max(100),payload:z.unknown().optional()}).strict(),'protocolAction',false],
   ['api_protocol_events','读取有界脱敏事件；gap 表示游标之前的记录已淘汰。',z.object({sessionId:id,after:z.number().int().min(0).optional(),limit:z.number().int().min(1).max(1000).optional()}).strict(),'protocolEvents',true],
   ['api_protocol_disconnect','关闭当前服务拥有的协议会话。',z.object({sessionId:id}).strict(),'protocolDisconnect',false],
   ['api_oauth_start','App 专用：显式启动 OAuth2，Token 仅写入所选敏感变量。',z.object({flow:z.enum(['authorization_code','client_credentials']),authorizationUrl:z.string().optional(),tokenUrl:z.string(),clientId:z.string(),clientSecret:z.string().optional(),scope:z.string().optional(),target:oauthTarget}).strict(),'oauthStart',false,'app'],

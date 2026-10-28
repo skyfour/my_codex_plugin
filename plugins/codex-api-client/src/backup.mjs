@@ -37,6 +37,9 @@ function visitAttachmentLocations(kind,data,map){
  if(kind==='collection'){
   const visit=node=>{
    network(node['x-codex-api-client']?.network);
+   const protocol=node.request?.['x-codex-api-client']?.protocol;
+   for(const entry of protocol?.protoFiles||[])field(entry,'path');
+   for(const key of ['caFile','certFile','keyFile'])field(protocol?.tls,key);
    const body=node.request?.body;
    if(body){field(body.file,'src');for(const part of body.formdata||[])if(part.type==='file')field(part,'src');}
    for(const child of node.item||[])visit(child);

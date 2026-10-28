@@ -1,12 +1,16 @@
 import {ProtocolSessions} from './protocol-sessions.mjs';
 import {webAdapters,validateWebConfig} from './protocol-web.mjs';
+import {grpcAdapter,grpcDefinition} from './protocol-grpc.mjs';
+import {mqttAdapter} from './protocol-mqtt.mjs';
+import {mcpAdapter} from './protocol-mcp.mjs';
 import {OAuthSessions} from './oauth.mjs';
 import {materializeNetwork,networkOf,markCredentials,authProblem} from './auth.mjs';
 import {BackupService} from './backup.mjs';
 import {BackupTransfer} from './backup-transfer.mjs';
 import { randomUUID } from 'node:crypto';
+import {constants as fsConstants} from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { mkdir, writeFile, readdir } from 'node:fs/promises';
+import { mkdir, writeFile, readdir, realpath, open, lstat } from 'node:fs/promises';
 import { executeCollection } from './execution.mjs';
 import { normalizeCollection, findItem, moveItem, duplicateItem, selectCollection } from './collections.mjs';
 import { importDocument, exportCurl, parseData, warningsFor } from './formats.mjs';
@@ -20,7 +24,7 @@ const summary = run => ({ id:run.id,status:run.status,name:run.name,createdAt:ru
 const json = v => JSON.stringify(v);
 
 export class ApiService {
-  constructor(store,{oauth}={}) { this.protocols=new ProtocolSessions(webAdapters); this.oauth=new OAuthSessions(store,oauth); this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store)); }
+  constructor(store,{oauth}={}) { this.protocols=new ProtocolSessions({...webAdapters,grpc:grpcAdapter,mqtt:mqttAdapter,mcp:mcpAdapter}); this.oauth=new OAuthSessions(store,oauth); this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store)); }
   async protocolConnect({collectionId,itemId,environmentId}) {
     const collection=await this.store.get('collection',collectionId,{reveal:true});
     const found=findItem(collection?.data||{},itemId);if(!found?.item.request)throw Error('NOT_FOUND');
@@ -49,7 +53,38 @@ export class ApiService {
     validateOptions(network);
     const runtime={...resolve(config),url:resolve(typeof request.url==='string'?request.url:request.url?.raw||''),headers,network,secrets};runtime.connectTimeout??=network.requestTimeout;
     if(runtime.auth)runtime.auth=Object.fromEntries(Object.entries(runtime.auth).map(([k,v])=>[k,isSecret(v)?v.value:v]));
-    validateWebConfig(runtime);return this.protocols.connect(runtime);
+    if(['grpc','mqtt','mcp'].includes(runtime.type))await this.prepareNativeProtocol(runtime);else validateWebConfig(runtime);return this.protocols.connect(runtime);
+  }
+  async prepareNativeProtocol(c){
+    const common=['version','type','url','headers','network','secrets','connectTimeout','operationTimeout','tls'];
+    const extra={grpc:['protoFiles','protoEntry','reflection','metadata'],mqtt:['username','password','clientId','reconnectAttempts','reconnectDelay'],mcp:['transport']}[c.type];
+    for(const key of Object.keys(c))if(![...common,...extra].includes(key))throw Error('PROTOCOL_CONFIG_UNSUPPORTED');
+    let url;try{url=new URL(c.url);}catch{throw Error('PROTOCOL_URL_INVALID');}
+    if(url.username||url.password)throw Error('PROTOCOL_URL_CREDENTIALS');
+    if(!({grpc:['grpc:','grpcs:'],mqtt:['mqtt:','mqtts:'],mcp:['http:','https:']}[c.type]).includes(url.protocol))throw Error('PROTOCOL_URL_INVALID');
+    if(['grpc','mqtt'].includes(c.type)&&(url.pathname&&url.pathname!=='/'||url.search||url.hash))throw Error('PROTOCOL_URL_INVALID');
+    for(const [key,min,max]of [['connectTimeout',1,300000],['operationTimeout',1,300000],['reconnectAttempts',0,3],['reconnectDelay',0,60000]])if(c[key]!==undefined&&(!Number.isInteger(c[key])||c[key]<min||c[key]>max))throw Error('PROTOCOL_CONFIG_INVALID');
+    if(c.network.proxy||c.network.proxyCredentials?.length||c.network.noProxy?.length||c.network.caFile||c.network.certificates?.length)throw Error('PROTOCOL_NETWORK_UNSUPPORTED: 原生协议使用专用 TLS 文件配置，不支持 HTTP 代理');
+    if(c.type==='mcp'&&(c.tls||c.network.strictSSL===false))throw Error('PROTOCOL_NETWORK_UNSUPPORTED: MCP 使用系统 TLS');
+    if(c.type==='mcp'&&!['http','sse'].includes(c.transport||'http'))throw Error('PROTOCOL_CONFIG_INVALID');
+    if(c.type==='grpc'&&c.network.strictSSL===false)throw Error('PROTOCOL_NETWORK_UNSUPPORTED: gRPC 必须验证 TLS');
+    const uploads=join(this.store.directory,'uploads'),owned=(await readdir(uploads).catch(()=>[])).map(p=>join(uploads,p));
+    const permitted=new Set([...owned,...(c.network.allowedFiles||[])].map(p=>resolve(p)));
+    const file=async path=>{
+      if(typeof path!=='string'||!permitted.has(resolve(path)))throw Error('PROTOCOL_FILE_FORBIDDEN');
+      let handle;try{const actual=await realpath(path);if((await lstat(path)).isSymbolicLink())throw Error();handle=await open(actual,fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);const info=await handle.stat();if(!info.isFile()||info.size>1024*1024)throw Error();const buffer=Buffer.alloc(1024*1024+1),{bytesRead}=await handle.read(buffer,0,buffer.length,0);if(bytesRead>1024*1024)throw Error();return buffer.subarray(0,bytesRead);}catch{throw Error('PROTOCOL_FILE_INVALID');}finally{await handle?.close();}
+    };
+    if(c.tls){if(typeof c.tls!=='object'||Array.isArray(c.tls)||Object.keys(c.tls).some(k=>!['caFile','certFile','keyFile','passphrase'].includes(k)))throw Error('PROTOCOL_CONFIG_INVALID');if(!['grpcs:','mqtts:'].includes(url.protocol))throw Error('PROTOCOL_TLS_REQUIRES_SECURE_URL');if(!!c.tls.certFile!==!!c.tls.keyFile)throw Error('PROTOCOL_TLS_CERT_KEY_REQUIRED');c.tlsBytes={};for(const [key,path]of Object.entries(c.tls))if(key.endsWith('File'))c.tlsBytes[key.slice(0,-4)]=await file(path);if(c.tls.passphrase)c.tlsBytes.passphrase=isSecret(c.tls.passphrase)?c.tls.passphrase.value:c.tls.passphrase;if(c.type==='grpc'&&c.tlsBytes.passphrase)throw Error('PROTOCOL_TLS_PASSPHRASE_UNSUPPORTED: gRPC 需要未加密 PEM key');if(c.tlsBytes.key)c.secrets.push(c.tlsBytes.key.toString());}
+    for(const key of ['username','password'])if(c[key]!==undefined){c[key]=isSecret(c[key])?c[key].value:c[key];if(typeof c[key]!=='string')throw Error('PROTOCOL_CONFIG_INVALID');c.secrets.push(c[key]);}
+    if(c.type==='mqtt'&&Object.keys(c.headers).length)throw Error('PROTOCOL_AUTH_UNSUPPORTED: MQTT 使用专用 username/password');
+    if(c.clientId!==undefined&&(typeof c.clientId!=='string'||c.clientId.length>128))throw Error('PROTOCOL_CONFIG_INVALID');
+    if(c.metadata!==undefined&&(!Array.isArray(c.metadata)||c.metadata.length>100||c.metadata.some(row=>!row||typeof row.key!=='string'||!/^([0-9a-z_.-]+)$/.test(row.key)||typeof row.value!=='string')))throw Error('PROTOCOL_METADATA_INVALID');
+    for(const row of c.metadata||[])if(!row.disabled){c.secrets.push(row.value);if(row.key.endsWith('-bin')){if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(row.value))throw Error('PROTOCOL_METADATA_INVALID');c.secrets.push(Buffer.from(row.value,'base64'));}}
+    if(c.type==='grpc'){
+      if(c.reflection!==undefined&&typeof c.reflection!=='boolean')throw Error('PROTOCOL_CONFIG_INVALID');
+      if(c.reflection){if(c.protoFiles?.length)throw Error('PROTOCOL_PROTO_SOURCE_CONFLICT');}
+      else {if(!Array.isArray(c.protoFiles)||!c.protoFiles.length||c.protoFiles.length>100||typeof c.protoEntry!=='string')throw Error('PROTOCOL_PROTO_REQUIRED');const files=new Map();for(const entry of c.protoFiles){if(!entry||typeof entry.name!=='string'||!/^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/.test(entry.name)||entry.name.split('/').some(v=>v==='.'||v==='..')||files.has(entry.name))throw Error('PROTOCOL_PROTO_NAME_INVALID');files.set(entry.name,(await file(entry.path)).toString('utf8'));}if([...files.values()].reduce((n,s)=>n+Buffer.byteLength(s),0)>10*1024*1024)throw Error('PROTOCOL_PROTO_LIMIT');c.definition=grpcDefinition(files,c.protoEntry);}
+    }
   }
   protocolAction(args){return this.protocols.action(args);}
   protocolEvents(args){return this.protocols.events(args);}

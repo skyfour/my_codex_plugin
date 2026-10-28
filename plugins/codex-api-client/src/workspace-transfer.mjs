@@ -48,7 +48,7 @@ export async function sanitizedPortableData(data){
    if(key==='secretRef')continue;
    if(key==='value'&&(/^(authorization|proxy-authorization|cookie|set-cookie|x-api-key)$/i.test(value.key||'')||authSecrets[parent]?.includes(value.key))){out[key]='';continue;}
    if(typeof v==='string'&&/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/.test(v)){out[key]='';continue;}
-   if(['url','raw'].includes(key)&&typeof v==='string'&&/^https?:\/\//i.test(v)){
+   if(['url','raw'].includes(key)&&typeof v==='string'&&/^(?:https?|wss?|mqtts?|grpcs?):\/\//i.test(v)){
     try{const url=new URL(v);if(url.username||url.password){url.username='';url.password='';out[key]=url.toString();continue;}}catch{}
    }
    if(/^(password|clientSecret|privateKey|passphrase|accessToken|refreshToken)$/i.test(key)){out[key]='';continue;}

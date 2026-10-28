@@ -44,6 +44,7 @@ export function markCredentials(input){
   if(Array.isArray(value))return value.map(visit);
   if(!value||typeof value!=='object')return value;
   const out=Object.fromEntries(Object.entries(value).map(([k,v])=>[k,visit(v)]));
+  if(out.protocol){for(const key of ['username','password'])if(typeof out.protocol[key]==='string')out.protocol[key]={key,type:'secret',value:out.protocol[key]};if(Array.isArray(out.protocol.metadata))out.protocol.metadata=out.protocol.metadata.map(v=>({...v,type:'secret'}));}
   if(out.protocol?.auth&&typeof out.protocol.auth==='object')out.protocol.auth=Object.fromEntries(Object.entries(out.protocol.auth).map(([key,value])=>[key,value&&typeof value==='object'&&value.key?{...value,type:'secret'}:{key,type:'secret',value}]));
   if(out.auth){for(const [type,fields]of Object.entries(AUTH_FIELDS))if(Array.isArray(out.auth[type]))out.auth[type]=out.auth[type].map(v=>AUTH_SECRETS.includes(v.key)?{...v,type:'secret'}:v);}
   if(/^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-amz-security-token)$/i.test(String(out.key||'')))out.type='secret';
