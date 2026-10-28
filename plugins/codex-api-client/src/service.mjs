@@ -239,7 +239,7 @@ export class ApiService {
     if(own){own.controller.abort();await own.completion;}
     return this.result({runId});
   }
-  async close() { this.oauth.close(); this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
+  async close() { await this.oauth.close(); this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
 }
 function sanitize(value,secrets) {
   const encoded=[];

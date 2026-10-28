@@ -19,7 +19,7 @@ export class OAuthSessions{
   if([...this.sessions.values()].filter(s=>s.status==='pending').length>=4||this.sessions.size>=100)throw Error('OAUTH_LIMIT');
   const s={id:randomUUID(),status:'pending',target:config.target,config,controller:new AbortController(),expiresAt:new Date(Date.now()+this.ttl).toISOString()};this.sessions.set(s.id,s);
   s.timer=setTimeout(()=>this.finish(s,'expired','OAUTH_EXPIRED'),this.ttl);s.timer.unref();
-  if(config.flow==='client_credentials'){await this.exchange(s,{grant_type:'client_credentials'});return this.status(s);}
+  if(config.flow==='client_credentials'){s.completion=this.exchange(s,{grant_type:'client_credentials'});return this.status(s);}
   s.state=randomBytes(32).toString('base64url');s.verifier=randomBytes(48).toString('base64url');
   s.server=http.createServer(async(req,res)=>{
    const url=new URL(req.url,'http://127.0.0.1');
@@ -30,7 +30,7 @@ export class OAuthSessions{
    const code=url.searchParams.get('code');if(url.searchParams.has('error')||!code||url.searchParams.getAll('code').length!==1||code.length>8192){respond(400,'OAuth authorization failed');this.finish(s,'failed','OAUTH_AUTHORIZATION');return;}
    // Close listener before exchange; no code/state reflected into page or results.
    respond(200,'授权已收到，请返回 API Client。');s.server.close();s.server.closeIdleConnections();
-   await this.exchange(s,{grant_type:'authorization_code',code,redirect_uri:s.redirectUri,code_verifier:s.verifier});
+   s.completion=this.exchange(s,{grant_type:'authorization_code',code,redirect_uri:s.redirectUri,code_verifier:s.verifier});await s.completion;
   });
   try{await new Promise((resolve,reject)=>{s.server.once('error',reject);s.server.listen(0,'127.0.0.1',resolve);});s.redirectUri=`http://127.0.0.1:${s.server.address().port}/oauth/callback`;const url=endpoint(config.authorizationUrl);for(const key of ['code','access_token','token','client_secret','password'])url.searchParams.delete(key);for(const [k,v]of Object.entries({response_type:'code',client_id:config.clientId,redirect_uri:s.redirectUri,state:s.state,code_challenge:createHash('sha256').update(s.verifier).digest('base64url'),code_challenge_method:'S256',scope:config.scope||''}))url.searchParams.set(k,v);await this.open(url.toString());}catch{this.finish(s,'failed','OAUTH_BROWSER');}
   return this.status(s);
@@ -58,7 +58,7 @@ export class OAuthSessions{
   if(!['environment','globals'].includes(target?.kind))throw Error('OAUTH_TARGET');
   const doc=await this.store.get(target.kind,target.id,{reveal:true});let config;try{config=JSON.parse(doc?.data.values.find(v=>v.key===target.key+'.__oauth')?.value);}catch{throw Error('OAUTH_REFRESH: 没有刷新凭据');}
   if(!config.refreshToken)throw Error('OAUTH_REFRESH: 没有刷新凭据');
-  const s={id:randomUUID(),status:'pending',target,config,controller:new AbortController(),expiresAt:new Date(Date.now()+this.ttl).toISOString()};this.sessions.set(s.id,s);s.timer=setTimeout(()=>this.finish(s,'expired','OAUTH_EXPIRED'),this.ttl);s.timer.unref();await this.exchange(s,{grant_type:'refresh_token',refresh_token:typeof config.refreshToken==='object'?config.refreshToken.value:config.refreshToken});return this.status(s);
+  const s={id:randomUUID(),status:'pending',target,config,controller:new AbortController(),expiresAt:new Date(Date.now()+this.ttl).toISOString()};this.sessions.set(s.id,s);s.timer=setTimeout(()=>this.finish(s,'expired','OAUTH_EXPIRED'),this.ttl);s.timer.unref();s.completion=this.exchange(s,{grant_type:'refresh_token',refresh_token:typeof config.refreshToken==='object'?config.refreshToken.value:config.refreshToken});return this.status(s);
  }
- close(){for(const s of this.sessions.values()){this.finish(s,'cancelled');clearTimeout(s.cleanupTimer);}this.sessions.clear();}
+ async close(){const sessions=[...this.sessions.values()];for(const s of sessions){this.finish(s,'cancelled');clearTimeout(s.cleanupTimer);}await Promise.allSettled(sessions.map(s=>s.completion));this.sessions.clear();}
 }

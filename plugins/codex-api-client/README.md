@@ -102,6 +102,6 @@ cURL 额外支持 `-G/--get`、`--data-urlencode`、`-A/--user-agent`、`-e/--re
 
 OAuth2 的“开始 OAuth 授权”是唯一打开系统浏览器的操作。授权码使用 S256 PKCE、随机 state 和 `http://127.0.0.1:<临时端口>/oauth/callback`；提供方需要允许回环动态端口。授权期限为 3 分钟，取消、过期、完成或服务关闭会关闭监听器。Token 端点只接受 HTTPS（回环本地模拟服务允许 HTTP），不跟随跳转，客户端凭据通过表单提交。Token 保存到指定环境变量，刷新配置保存为同环境下 `<变量名>.__oauth` 敏感变量；不返回 Token、code 或提供方错误正文。刷新仅更新指定变量，不修改其他环境。普通导出排除这些值，完整加密备份可迁移它们。
 
-`api_oauth_start({flow,authorizationUrl?,tokenUrl,clientId,clientSecret?,scope?,target:{kind,id,key}})`、`api_oauth_poll({sessionId})`、`api_oauth_cancel({sessionId})`、`api_oauth_refresh({target})` 均仅对 App 可见。`target.kind` 为 `environment` 或 `globals`（UI 选择环境）；结果只含会话状态、目标和过期时间等脱敏元信息。最多 4 个活动 OAuth 会话，完成结果保留 5 分钟，最多 100 条。
+`api_oauth_start({flow,authorizationUrl?,tokenUrl,clientId,clientSecret?,scope?,target:{kind,id,key}})`、`api_oauth_poll({sessionId})`、`api_oauth_cancel({sessionId})`、`api_oauth_refresh({target})` 均仅对 App 可见。`target.kind` 为 `environment` 或 `globals`（UI 选择环境）；结果只含会话状态、目标和过期时间等脱敏元信息。客户端凭据与刷新操作立即返回 pending 会话 ID，界面通过 poll 获取完成状态，交换期间可取消；离开认证面板也会取消。最多 4 个活动 OAuth 会话，完成结果保留 5 分钟，最多 100 条。
 
 请求“网络”面板可覆盖超时、TLS 校验、重定向、代理和上传 CA/客户端证书；省略字段继承全局，保存在请求 item 的 `x-codex-api-client.network`。`proxy:null` 表示直接连接，不回退系统环境变量代理。全局设置支持 `proxyCredentials:[{key:"username",value,type:"secret"},{key:"password",value,type:"secret"}]` 及 `noProxy` 原生 URL 匹配规则（如 `http+https://localhost:*/*`）。凭据和绕过规则由 Postman SDK 处理。请求 CA/证书路径纳入加密备份附件访客并在恢复时重映射，文件访问仍受显式许可/上传附件限制。HTTP 集合逐项重置网络设置，后续请求不继承前一请求的覆盖。

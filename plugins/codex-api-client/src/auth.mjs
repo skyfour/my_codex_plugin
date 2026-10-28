@@ -19,6 +19,14 @@ export function authProblem(auth){
  if(!auth||auth.type==='noauth')return '';
  if(!AUTH_FIELDS[auth.type])return 'UNSUPPORTED: 不支持认证方式';
  const p=Object.fromEntries((auth[auth.type]||[]).filter(v=>!v.disabled).map(v=>[v.key,v.value]));
+ if(auth.type==='asap'){
+  let claims=p.claims||{};
+  if(typeof claims==='string'){try{claims=claims.trim()&&JSON.parse(claims.trim());}catch{return 'AUTH_INVALID: ASAP claims JSON 无效';}}
+  if(claims===null)return 'AUTH_INVALID: ASAP claims 无效';
+  // Native ASAP gives truthy claims values precedence over top-level fields.
+  for(const key of ['kid','iss','aud'])p[key]=claims[key]||p[key];
+  if(['kid','iss','aud','privateKey'].some(key=>!p[key]))return 'AUTH_INVALID: ASAP 必需字段不完整（kid, iss, aud, privateKey）';
+ }
  const need=[...(AUTH_REQUIRED[auth.type]||[])];
  if(auth.type==='oauth1')need.push(String(p.signatureMethod).startsWith('RSA')?'privateKey':'consumerSecret');
  if(auth.type==='jwt')need.push(String(p.algorithm).startsWith('HS')?'secret':'privateKey');
