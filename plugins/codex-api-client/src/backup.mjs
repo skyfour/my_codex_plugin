@@ -1,12 +1,13 @@
 import {validateDocument,validateHistory} from './document-validation.mjs';
 import {uniqueName} from './workspace-transfer.mjs';
 import {randomBytes,randomUUID,scryptSync,createCipheriv,createDecipheriv,createHash} from 'node:crypto';
-import {readFileSync,writeFileSync,mkdirSync,rmSync,realpathSync,statSync,readdirSync} from 'node:fs';
+import {writeFileSync,mkdirSync,rmSync,realpathSync,statSync,readdirSync,openSync,fstatSync,readSync,closeSync} from 'node:fs';
 import {join,resolve,basename} from 'node:path';
 export const BACKUP_LIMIT=256*1024*1024,FILE_LIMIT=20*1024*1024;
+const PLAIN_LIMIT=Math.floor(BACKUP_LIMIT*0.74);
 const kdf={N:32768,r:8,p:1},prefs=['requestTimeout','scriptTimeout','runTimeout','strictSSL','followRedirects','delay','proxy','proxyCredentials','noProxy','caFile','certificates','maxResponseSize','selectedEnvironment','ui'];
 const fail=()=>{throw new Error('BACKUP_INVALID: 备份无效、密码错误或超过限制');};
-export function encryptArchive(data,password){if(typeof password!=='string'||!password.length)fail();const plain=Buffer.from(JSON.stringify(data));if(plain.length>Math.floor(BACKUP_LIMIT*0.74))fail();const salt=randomBytes(16),nonce=randomBytes(12),key=scryptSync(password,salt,32,{...kdf,maxmem:64*1024*1024}),cipher=createCipheriv('aes-256-gcm',key,nonce);const ciphertext=Buffer.concat([cipher.update(plain),cipher.final()]);key.fill(0);return Buffer.from(JSON.stringify({format:'codex-api-client-encrypted',version:1,kdf,salt:salt.toString('base64'),nonce:nonce.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:ciphertext.toString('base64')}));}
+export function encryptArchive(data,password){if(typeof password!=='string'||!password.length)fail();const plain=Buffer.from(JSON.stringify(data));if(plain.length>PLAIN_LIMIT)fail();const salt=randomBytes(16),nonce=randomBytes(12),key=scryptSync(password,salt,32,{...kdf,maxmem:64*1024*1024}),cipher=createCipheriv('aes-256-gcm',key,nonce);const ciphertext=Buffer.concat([cipher.update(plain),cipher.final()]);key.fill(0);return Buffer.from(JSON.stringify({format:'codex-api-client-encrypted',version:1,kdf,salt:salt.toString('base64'),nonce:nonce.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:ciphertext.toString('base64')}));}
 export function decryptArchive(bytes,password){try{if(bytes.length>BACKUP_LIMIT)fail();const e=JSON.parse(bytes);if(e.format!=='codex-api-client-encrypted'||e.version!==1||JSON.stringify(e.kdf)!==JSON.stringify(kdf))fail();const salt=Buffer.from(e.salt,'base64'),nonce=Buffer.from(e.nonce,'base64'),tag=Buffer.from(e.tag,'base64');if(salt.length!==16||nonce.length!==12||tag.length!==16)fail();const key=scryptSync(password,salt,32,{...kdf,maxmem:64*1024*1024}),decipher=createDecipheriv('aes-256-gcm',key,nonce);decipher.setAuthTag(tag);const plain=Buffer.concat([decipher.update(Buffer.from(e.ciphertext,'base64')),decipher.final()]);key.fill(0);if(plain.length>BACKUP_LIMIT)fail();return JSON.parse(plain);}catch{fail();}}
 function walk(value,fn){if(Array.isArray(value))return value.map(v=>walk(v,fn));if(!value||typeof value!=='object')return typeof value==='string'?fn(value):value;return Object.fromEntries(Object.entries(value).filter(([k])=>k!=='secretRef').map(([k,v])=>[k,walk(v,fn)]));}
 const settings=data=>Object.fromEntries(prefs.filter(k=>k in data).map(k=>[k,k==='ui'?Object.fromEntries(Object.entries(data.ui||{}).filter(([p,v])=>['theme','sidebarOpen','responseTab'].includes(p)&&['string','boolean'].includes(typeof v))):data[k]]));
@@ -70,7 +71,7 @@ function restoreHistory(history,mapping,mode){
 export class BackupService {
  constructor(store){this.store=store;this.sessions=new Map();this.directory=join(store.directory,'backup-files');mkdirSync(this.directory,{recursive:true,mode:0o700});const rows=store.db.prepare('SELECT data FROM documents').all();for(const name of readdirSync(this.directory)){const path=join(this.directory,name);if(statSync(path).isDirectory()&&!rows.some(r=>r.data.includes(path)))rmSync(path,{recursive:true,force:true});}}
  async capture(includeHistory=false,context){
-  const documents=[],files=[],paths=new Map();
+  const documents=[],files=[],paths=new Map(),attachments=[];
   for(const row of this.store.db.prepare('SELECT * FROM documents').all()){
    const document=await this.store.view(row,{reveal:true});
    documents.push({kind:row.kind,id:row.id,data:row.kind==='settings'?settings(document.data):document.data});
@@ -86,15 +87,32 @@ export class BackupService {
    const path=realpathSync(original);
    if(!(path.startsWith(root+'/uploads/')||path.startsWith(root+'/backup-files/')||allowed.has(path)))throw new Error('BACKUP_FILE_DENIED: 附件未被允许读取');
    if(!paths.has(path)){
-    if(files.length>=1000||statSync(path).size>FILE_LIMIT)fail();
-    const data=readFileSync(path),id=randomUUID();
-    files.push({id,name:basename(path),sha256:createHash('sha256').update(data).digest('hex'),base64:data.toString('base64')});
+    const stat=statSync(path);
+    if(files.length>=1000||!stat.isFile()||stat.size>FILE_LIMIT)fail();
+    const id=randomUUID(),file={id,name:basename(path),sha256:'0'.repeat(64),base64:''};
+    files.push(file);attachments.push({path,size:stat.size,file});
     paths.set(path,'backup-file:'+id);
    }
    return paths.get(path);
   };
   for(const document of documents)visitAttachmentLocations(document.kind,document.data,captureFile);
-  return {version:1,documents:walk(documents,v=>v),files,history:includeHistory?this.store.listRuns():[]};
+  const archive={version:1,documents:walk(documents,v=>v),files,history:includeHistory?this.store.listRuns():[]};
+  // Empty payloads retain exact JSON overhead; base64 adds four ASCII bytes per three source bytes.
+  let bytes=Buffer.byteLength(JSON.stringify(archive));
+  for(const {size} of attachments)bytes+=4*Math.ceil(size/3);
+  if(bytes>PLAIN_LIMIT)fail();
+  for(const {path,size,file} of attachments){
+   const fd=openSync(path,'r');
+   try{
+    if(fstatSync(fd).size!==size)fail();
+    const data=Buffer.alloc(size);let offset=0;
+    while(offset<size){const read=readSync(fd,data,offset,size-offset,offset);if(!read)fail();offset+=read;}
+    // Bound reads even if a file grows after stat; reject truncation or an extra byte.
+    if(readSync(fd,Buffer.alloc(1),0,1,size))fail();
+    file.sha256=createHash('sha256').update(data).digest('hex');file.base64=data.toString('base64');
+   }finally{closeSync(fd);}
+  }
+  return archive;
  }
  async export(password,includeHistory=false,context){return encryptArchive(await this.capture(includeHistory,context),password);}
  async preview(bytes,password,mode='merge',context){const archive=decryptArchive(bytes,password);this.validate(archive);const transferId=randomUUID();this.sessions.set(transferId,{archive,password,mode,context,touched:Date.now()});const counts=kind=>archive.documents.filter(d=>d.kind===kind).length;return {transferId,collectionCount:counts('collection'),environmentCount:counts('environment'),credentialCount:JSON.stringify(archive).match(/"type":"secret"/g)?.length||0,fileCount:archive.files.length,cookieCount:archive.documents.find(d=>d.kind==='cookies')?.data.cookies?.length||0,conflicts:(await Promise.all(archive.documents.filter(d=>['globals','settings','cookies'].includes(d.kind)&&this.store.row(d.kind,'default')).map(async d=>conflictRows(d.kind,(await this.store.get(d.kind,'default',{reveal:true})).data,d.data)))).flat(),mode};}

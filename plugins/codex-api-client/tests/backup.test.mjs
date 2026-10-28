@@ -116,3 +116,41 @@ test('own encrypted backup preserves direct proxy null over inherited proxy and 
   }
  }finally{await source.close();await destination.close();for(const server of [target,proxy]){server.closeAllConnections();await new Promise(r=>server.close(r));}}
 }));
+import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
+import {FILE_LIMIT} from '../src/backup.mjs';
+for(const overhead of ['payload','history'])test(`capture preflights aggregate ${overhead} budget before attachment reads`,t=>isolated(async a=>{
+ const uploads=join(a.directory,'uploads');await mkdir(uploads);const item=[];
+ for(let i=0;i<(overhead==='payload'?8:7);i++){
+  const path=join(uploads,`sparse-${i}`),fd=fs.openSync(path,'w');fs.ftruncateSync(fd,FILE_LIMIT);fs.closeSync(fd);
+  item.push({id:`item-${i}`,request:{url:'https://example.test',body:{mode:'file',file:{src:path}}}});
+ }
+ await a.put('collection','budget',{info:{name:'budget'},item},0);
+ if(overhead==='history')a.saveRun({id:'history',status:'completed',responses:[{body:'x'.repeat(3*1024*1024)}],assertions:[],logs:[],errors:[]});
+ const backup=new BackupService(a),before=a.workspaceIdentity(),secrets=[...a.secrets.values],files=fs.readdirSync(a.directory,{recursive:true});let reads=0;
+ for(const method of ['readFileSync','readSync'])t.mock.method(fs,method,()=>{reads++;throw Error('UNEXPECTED_ATTACHMENT_READ');});syncBuiltinESMExports();
+ try{await assert.rejects(backup.capture(overhead==='history'),/BACKUP_INVALID/);assert.equal(reads,0);}
+ finally{t.mock.restoreAll();syncBuiltinESMExports();}
+ assert.equal(a.workspaceIdentity(),before);assert.deepEqual([...a.secrets.values],secrets);assert.deepEqual(fs.readdirSync(a.directory,{recursive:true}),files);
+}));
+test('capture keeps real single-file cap and deduplicates real paths in a valid roundtrip',()=>isolated(async(a,b)=>{
+ const uploads=join(a.directory,'uploads');await mkdir(uploads);const path=join(uploads,'small'),alias=join(uploads,'alias');await writeFile(path,'small attachment');fs.symlinkSync(path,alias);
+ await a.put('collection','dedupe',{info:{name:'dedupe'},item:[path,alias,path].map((src,i)=>({id:`request-${i}`,request:{url:'https://example.test',body:{mode:'file',file:{src}}}}))},0);
+ const source=new BackupService(a),target=new BackupService(b),archive=await source.capture();assert.equal(archive.files.length,1);assert.equal(new Set(archive.documents[0].data.item.map(v=>v.request.body.file.src)).size,1);
+ await target.restore((await target.preview(await source.export('p'),'p','replace')).transferId);
+ const restored=(await b.get('collection','dedupe')).data.item.map(v=>v.request.body.file.src);assert.equal(new Set(restored).size,1);assert.equal(fs.readFileSync(restored[0],'utf8'),'small attachment');
+ const fd=fs.openSync(path,'w');fs.ftruncateSync(fd,FILE_LIMIT+1);fs.closeSync(fd);await assert.rejects(source.capture(),/BACKUP_INVALID/);
+}));
+for(const change of ['grow','truncate'])test(`capture rejects files that ${change} during bounded reading and closes descriptors`,t=>isolated(async a=>{
+ const uploads=join(a.directory,'uploads');await mkdir(uploads);const path=join(uploads,'changing');await writeFile(path,'original');
+ await a.put('collection','changing',{info:{name:'changing'},item:[{id:'request',request:{url:'https://example.test',body:{mode:'file',file:{src:path}}}}]},0);
+ const backup=new BackupService(a),before=a.workspaceIdentity(),read=fs.readSync;let changed=false,descriptor;
+ t.mock.method(fs,'readSync',(fd,buffer,offset,length,position)=>{
+  descriptor=fd;const bytes=read(fd,buffer,offset,Math.min(length,1),position);
+  if(!changed){changed=true;if(change==='grow')fs.appendFileSync(path,'extra');else fs.truncateSync(path,0);}
+  return bytes;
+ });syncBuiltinESMExports();
+ try{await assert.rejects(backup.capture(),/BACKUP_INVALID/);assert.equal(changed,true);assert.throws(()=>fs.fstatSync(descriptor),/EBADF/);}
+ finally{t.mock.restoreAll();syncBuiltinESMExports();}
+ assert.equal(a.workspaceIdentity(),before);
+}));
