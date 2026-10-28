@@ -41,3 +41,22 @@ test('common cURL GET data URL encoding and attached headers preserve request se
  assert.equal(r.method,'GET');assert.equal(r.url,'https://example.test/search?fixed=yes&q=hello%20world&tag=a%2Bb');assert.equal(r.body,undefined);assert.equal(r.header.find(h=>h.key==='X-Test').value,'yes');assert.equal(r.header.find(h=>h.key==='User-Agent').value,'fixture-agent');assert.equal(r.header.find(h=>h.key==='Referer').value,'https://example.test/');
  assert.throws(()=>importDocument('curl https://example.test --data-urlencode q@/etc/passwd'),/UNSUPPORTED/);
 });
+
+test('existing collection, environment and workspace formats outrank unknown spec/HAR fields without losing them',async()=>{
+ const collection={info:{name:'Existing'},item:[{id:'original-id',name:'Original request',request:{method:'GET',url:'https://example.test/original'}}]};
+ const sources=[['collection',collection],['environment',{name:'Existing environment',values:[{key:'x',value:'original'}]}],['workspace',{format:'codex-api-client-workspace',version:1,collections:[collection],environments:[],globals:null}]];
+ const collisions=[{log:{custom:true}},{log:{version:'1.2',entries:[{request:{method:'GET',url:'https://example.test/wrong-collection',headers:[]}}]}},{openapi:{custom:true}},{openapi:'3.0.3'},{swagger:{custom:true}},{swagger:'2.0'}];
+ for(const [kind,source] of sources)for(const extra of collisions){
+  const input={...structuredClone(source),...extra},result=await importDocument(JSON.stringify(input));
+  assert.equal(result.kind,kind,`${kind} must outrank ${Object.keys(extra)[0]}`);
+  for(const [key,value]of Object.entries(extra))assert.deepEqual(result.data[key],value);
+  if(kind==='collection')assert.equal(result.data.item[0].id,'original-id');
+  if(kind==='environment')assert.deepEqual(result.data.values,input.values);
+  if(kind==='workspace')assert.equal(result.data.collections[0].item[0].id,'original-id');
+ }
+});
+test('format sniffing requires supported version syntax or actual HAR log shape',async()=>{
+ for(const data of [{...spec,openapi:{custom:true}},{...spec,openapi:'not-a-version'},{...spec,openapi:'2.0.0'},{info:{title:'Invalid'},swagger:true},{info:{title:'Invalid'},swagger:'3.0'},{log:{custom:true}},{log:{entries:'not-an-array'}},{log:{version:'invalid',entries:[{request:{url:'https://example.test',method:'GET'}}]}}]){
+  await assert.rejects(async()=>importDocument(JSON.stringify(data)),/IMPORT: 无法识别/);
+ }
+});

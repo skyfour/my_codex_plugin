@@ -25,14 +25,18 @@ export function importDocument(text,options={}) {
   if (text.startsWith('curl ')) return { kind: 'collection', data: normalizeCollection({ info: { name: 'cURL 导入' }, item: [curlRequest(text)] },{imported:true}), warnings: [] };
   const data = parseSpecText(text);
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('IMPORT: 需要集合或环境对象');
-  if(data.openapi||data.swagger)return importOpenApi(data,options).then(result=>({...result,warnings:[...result.warnings,...warningsFor(result.data)]}));
-  if(data.log)return importHar(data);
   if(data.format===WORKSPACE_FORMAT)return parseWorkspace(data);
   if (data.info && Array.isArray(data.item)) {
     if (data.info.schema && !/collection\/v2\.1\.0\//.test(data.info.schema)) throw new Error('IMPORT: 只支持 Postman Collection v2.1');
     return { kind: 'collection', data: normalizeCollection(data,{imported:true}), warnings: [...warningsFor(data),...folderWarnings(data)] };
   }
   if (Array.isArray(data.values)) return { kind: 'environment', data, warnings: [] };
+  // Existing formats own their discriminators, even when unknown fields resemble another format.
+  const openapiVersion = typeof data.openapi === 'string' && /^3\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(data.openapi);
+  if (openapiVersion || data.swagger === '2.0') return importOpenApi(data,options).then(result=>({...result,warnings:[...result.warnings,...warningsFor(result.data)]}));
+  const harLog = data.log && typeof data.log === 'object' && !Array.isArray(data.log)
+    && Array.isArray(data.log.entries) && (data.log.version === undefined || ['1.1','1.2'].includes(data.log.version));
+  if (harLog) return importHar(data);
   throw new Error('IMPORT: 无法识别 Postman Collection v2.1、环境、OpenAPI/Swagger 或 HAR 文件');
 }
 function curlRequest(text) {
