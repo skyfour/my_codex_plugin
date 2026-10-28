@@ -5,8 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { createServer,defaultDataDirectory } from '../src/server.mjs';
 import { invoke } from '../src/tools.mjs';
 
-export async function startPreview({port=47890,directory=defaultDataDirectory()}={}) {
-  const token=randomBytes(32).toString('hex'),app=createServer({directory});
+export async function startPreview({port=47890,directory=defaultDataDirectory(),secrets}={}) {
+  const token=randomBytes(32).toString('hex'),app=createServer({directory,secrets});
   const html=(await readFile(new URL('../dist/index.html',import.meta.url),'utf8')).replace('<head>',`<head><script>window.__DEV_TOKEN__=${JSON.stringify(token)};</script>`);
   const server=http.createServer(async(req,res)=>{
     res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');

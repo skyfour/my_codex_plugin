@@ -33,3 +33,18 @@ test('chunk transfer rejects invalid offsets and limits and cleans cancelled ses
 
 import {sanitizedPortableData} from '../src/workspace-transfer.mjs';
 test('ordinary export removes structured auth, headers, proxy credentials, private keys and references',async()=>{const data={auth:{type:'basic',basic:[{key:'password',value:'secret-auth'}]},request:{header:[{key:'Authorization',value:'Bearer secret-header'}],url:'https://user:pass@example.test/'},proxy:'http://u:proxy-secret@localhost:8080',privateKey:'-----BEGIN PRIVATE KEY-----private',values:[{key:'secret',value:'••••••••',type:'secret',secretRef:'keychain-ref'}]};const clean=JSON.stringify(await sanitizedPortableData(data));for(const secret of ['secret-auth','secret-header','proxy-secret','keychain-ref','BEGIN PRIVATE','user:pass'])assert(!clean.includes(secret));});
+test('conflicts expose masked individual rows and choices restore only selected globals Cookies and settings',()=>isolated(async(a,b)=>{
+ for(const [store,prefix]of [[a,'backup'],[b,'local']]){
+  await store.put('globals','default',{values:[{key:'A',type:'secret',value:prefix+'-A'},{key:'B',value:prefix+'-B'}]},0);
+  await store.put('cookies','default',{cookies:[{domain:prefix==='backup'?'.EXAMPLE.test':'example.test',path:'/',key:'first',value:prefix+'-first'},{domain:'example.test',path:'/other',key:'second',value:prefix+'-second'}]},0);
+  await store.put('settings','default',{requestTimeout:prefix==='backup'?111:222,followRedirects:prefix==='backup',ui:{theme:prefix==='backup'?'dark':'light'}},0);
+ }
+ const source=new BackupService(a),target=new BackupService(b),preview=await target.preview(await source.export('password'),'password');
+ assert.equal(preview.conflicts.length,7);assert(!JSON.stringify(preview).includes('backup-A'));assert(!JSON.stringify(preview).includes('local-first'));
+ const select=(kind,key)=>preview.conflicts.find(r=>r.kind===kind&&r.key===key).id;
+ const cookie=preview.conflicts.find(r=>r.kind==='cookies'&&r.key==='first');assert.equal(cookie.domain,'example.test');assert.equal(cookie.path,'/');assert.equal(cookie.local,'masked');assert.equal(cookie.backup,'masked');
+ await target.restore(preview.transferId,{[select('globals','A')]:'backup',[cookie.id]:'backup',[select('settings','requestTimeout')]:'backup',[select('settings','ui.theme')]:'backup'});
+ const globals=(await b.get('globals','default',{reveal:true})).data.values;assert.equal(globals.find(v=>v.key==='A').value,'backup-A');assert.equal(globals.find(v=>v.key==='B').value,'local-B');
+ const cookies=(await b.get('cookies','default',{reveal:true})).data.cookies;assert.equal(cookies.length,2);assert.equal(cookies.find(c=>c.key==='first').value,'backup-first');assert.equal(cookies.find(c=>c.key==='second').value,'local-second');
+ const settings=(await b.get('settings','default')).data;assert.equal(settings.requestTimeout,111);assert.equal(settings.followRedirects,false);assert.equal(settings.ui.theme,'dark');
+}));
