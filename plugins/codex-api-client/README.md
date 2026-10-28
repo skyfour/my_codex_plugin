@@ -28,7 +28,7 @@ npm run install:api-client
 
 ## 支持范围
 
-支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key、cURL/Postman、OpenAPI3/Swagger2 JSON/YAML、HAR 导入和 GraphQL、JSON/CSV 数据迭代和取消运行。当前不支持 OAuth 授权窗口、GraphQL 以外的其他协议、Vault 或云脚本包。
+支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key 与高级鉴权、cURL/Postman、OpenAPI3/Swagger2 JSON/YAML、HAR 导入和 GraphQL、JSON/CSV 数据迭代和取消运行。OAuth2 支持系统浏览器授权码 + PKCE、客户端凭据和刷新；当前不支持 GraphQL 以外的其他协议、Vault 或云脚本包。
 
 ## 快速操作
 
@@ -94,3 +94,14 @@ cURL 额外支持 `-G/--get`、`--data-urlencode`、`-A/--user-agent`、`-e/--re
 在请求体类型选择 GraphQL，编辑 query、JSON variables 和 operationName。保存/导入/导出仍使用 Postman `body.mode=graphql`；发送、脚本、断言、环境、继承认证、Cookie 和网络设置沿用 HTTP Runner。GraphQL cURL 导出为 JSON 请求体，变量 JSON 无效时拒绝导出。
 
 点击「发送 Schema introspection」后才实际访问目标，打开页面不会发送。该操作先保存草稿，再通过 `api_graphql_introspect({collectionId,itemId,environmentId?})` 使用既有 HTTP 运行链返回 runId；使用 `api_run_result` 轮询并可通过 `api_run_cancel` 取消。保存请求的 body 不改变，但原有脚本照常执行，可能写入环境等作用域。成功后选择 schema 类型，在查询中输入字段前缀或 Ctrl+Space 使用实际字段补全；服务端禁用 introspection、GraphQL 错误或 HTTP 错误会明确提示。
+
+
+## 高级鉴权与请求网络
+
+认证表单使用已安装 `postman-runtime` 的字段：Digest、OAuth1、OAuth2 Bearer、AWS Signature v4、Hawk、NTLM、EdgeGrid、JWT、ASAP。界面显示必需字段，缺失或非法配置会阻止请求；签名仍由运行时完成。密码、Token、私钥、结构明确的 Authorization/Cookie 请求头、代理凭据和证书口令在保存、导入及完整恢复时自动进入 Keychain。复制集合/环境使用 `api_document_duplicate` 在后端重新保护凭据，返回值仍隐藏。
+
+OAuth2 的“开始 OAuth 授权”是唯一打开系统浏览器的操作。授权码使用 S256 PKCE、随机 state 和 `http://127.0.0.1:<临时端口>/oauth/callback`；提供方需要允许回环动态端口。授权期限为 3 分钟，取消、过期、完成或服务关闭会关闭监听器。Token 端点只接受 HTTPS（回环本地模拟服务允许 HTTP），不跟随跳转，客户端凭据通过表单提交。Token 保存到指定环境变量，刷新配置保存为同环境下 `<变量名>.__oauth` 敏感变量；不返回 Token、code 或提供方错误正文。刷新仅更新指定变量，不修改其他环境。普通导出排除这些值，完整加密备份可迁移它们。
+
+`api_oauth_start({flow,authorizationUrl?,tokenUrl,clientId,clientSecret?,scope?,target:{kind,id,key}})`、`api_oauth_poll({sessionId})`、`api_oauth_cancel({sessionId})`、`api_oauth_refresh({target})` 均仅对 App 可见。`target.kind` 为 `environment` 或 `globals`（UI 选择环境）；结果只含会话状态、目标和过期时间等脱敏元信息。最多 4 个活动 OAuth 会话，完成结果保留 5 分钟，最多 100 条。
+
+请求“网络”面板可覆盖超时、TLS 校验、重定向、代理和上传 CA/客户端证书；省略字段继承全局，保存在请求 item 的 `x-codex-api-client.network`。`proxy:null` 表示直接连接，不回退系统环境变量代理。全局设置支持 `proxyCredentials:[{key:"username",value,type:"secret"},{key:"password",value,type:"secret"}]` 及 `noProxy` 原生 URL 匹配规则（如 `http+https://localhost:*/*`）。凭据和绕过规则由 Postman SDK 处理。请求 CA/证书路径纳入加密备份附件访客并在恢复时重映射，文件访问仍受显式许可/上传附件限制。HTTP 集合逐项重置网络设置，后续请求不继承前一请求的覆盖。

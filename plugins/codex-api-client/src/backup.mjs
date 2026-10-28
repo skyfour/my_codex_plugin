@@ -3,7 +3,7 @@ import {randomBytes,randomUUID,scryptSync,createCipheriv,createDecipheriv,create
 import {readFileSync,writeFileSync,mkdirSync,rmSync,realpathSync,statSync,readdirSync} from 'node:fs';
 import {join,resolve,basename} from 'node:path';
 export const BACKUP_LIMIT=256*1024*1024,FILE_LIMIT=20*1024*1024;
-const kdf={N:32768,r:8,p:1},prefs=['requestTimeout','scriptTimeout','runTimeout','strictSSL','followRedirects','delay','proxy','caFile','certificates','maxResponseSize','selectedEnvironment','ui'];
+const kdf={N:32768,r:8,p:1},prefs=['requestTimeout','scriptTimeout','runTimeout','strictSSL','followRedirects','delay','proxy','proxyCredentials','noProxy','caFile','certificates','maxResponseSize','selectedEnvironment','ui'];
 const fail=()=>{throw new Error('BACKUP_INVALID: 备份无效、密码错误或超过限制');};
 export function encryptArchive(data,password){if(typeof password!=='string'||!password.length)fail();const plain=Buffer.from(JSON.stringify(data));if(plain.length>Math.floor(BACKUP_LIMIT*0.74))fail();const salt=randomBytes(16),nonce=randomBytes(12),key=scryptSync(password,salt,32,{...kdf,maxmem:64*1024*1024}),cipher=createCipheriv('aes-256-gcm',key,nonce);const ciphertext=Buffer.concat([cipher.update(plain),cipher.final()]);key.fill(0);return Buffer.from(JSON.stringify({format:'codex-api-client-encrypted',version:1,kdf,salt:salt.toString('base64'),nonce:nonce.toString('base64'),tag:cipher.getAuthTag().toString('base64'),ciphertext:ciphertext.toString('base64')}));}
 export function decryptArchive(bytes,password){try{if(bytes.length>BACKUP_LIMIT)fail();const e=JSON.parse(bytes);if(e.format!=='codex-api-client-encrypted'||e.version!==1||JSON.stringify(e.kdf)!==JSON.stringify(kdf))fail();const salt=Buffer.from(e.salt,'base64'),nonce=Buffer.from(e.nonce,'base64'),tag=Buffer.from(e.tag,'base64');if(salt.length!==16||nonce.length!==12||tag.length!==16)fail();const key=scryptSync(password,salt,32,{...kdf,maxmem:64*1024*1024}),decipher=createDecipheriv('aes-256-gcm',key,nonce);decipher.setAuthTag(tag);const plain=Buffer.concat([decipher.update(Buffer.from(e.ciphertext,'base64')),decipher.final()]);key.fill(0);if(plain.length>BACKUP_LIMIT)fail();return JSON.parse(plain);}catch{fail();}}
@@ -32,9 +32,11 @@ function mergeSingleton(kind,local,backup,decisions,files){
 // Only these Postman/network schema locations denote machine files. A business value
 // equal to a path or document ID must remain byte-for-byte unchanged.
 function visitAttachmentLocations(kind,data,map){
+ const network=data=>{if(!data)return;field(data,'caFile');for(const certificate of data.certificates||[])for(const key of ['cert','key','pfx']){if(certificate[key]&&typeof certificate[key]==='object')field(certificate[key],'src');else field(certificate,key);}};
  const field=(object,key)=>{if(!object||!(key in object))return;const value=object[key];if(Array.isArray(value))object[key]=value.map(v=>typeof v==='string'&&v?map(v):v);else if(typeof value==='string'&&value)object[key]=map(value);};
  if(kind==='collection'){
   const visit=node=>{
+   network(node['x-codex-api-client']?.network);
    const body=node.request?.body;
    if(body){field(body.file,'src');for(const part of body.formdata||[])if(part.type==='file')field(part,'src');}
    for(const child of node.item||[])visit(child);

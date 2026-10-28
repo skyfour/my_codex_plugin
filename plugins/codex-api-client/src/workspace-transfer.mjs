@@ -1,3 +1,4 @@
+import {markCredentials} from './auth.mjs';
 import {normalizeCollection,flattenRequests} from './collections.mjs';
 import {transformSecrets} from './secrets.mjs';
 export const WORKSPACE_FORMAT='codex-api-client-workspace';
@@ -38,7 +39,7 @@ const authSecrets={
  edgegrid:['clientSecret','clientToken','accessToken'],jwt:['secret','privateKey'],asap:['privateKey'],
 };
 export async function sanitizedPortableData(data){
- const clean=await portableData(data);
+ const clean=await portableData(markCredentials(data));
  const visit=(value,parent='')=>{
   if(Array.isArray(value))return value.map(v=>visit(v,parent));
   if(!value||typeof value!=='object')return value;
@@ -61,4 +62,4 @@ export async function sanitizedPortableData(data){
  return visit(clean);
 }
 
-export const portableSettings=data=>Object.fromEntries(['requestTimeout','scriptTimeout','runTimeout','strictSSL','followRedirects','delay','maxResponseSize','proxy','ui'].filter(k=>k in data).map(k=>[k,data[k]]));
+export const portableSettings=data=>Object.fromEntries(['requestTimeout','scriptTimeout','runTimeout','strictSSL','followRedirects','delay','maxResponseSize','proxy','noProxy','proxyCredentials','ui'].filter(k=>k in data).map(k=>[k,data[k]]));

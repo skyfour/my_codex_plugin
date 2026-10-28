@@ -1,3 +1,5 @@
+import {OAuthSessions} from './oauth.mjs';
+import {materializeNetwork,networkOf,markCredentials} from './auth.mjs';
 import {BackupService} from './backup.mjs';
 import {BackupTransfer} from './backup-transfer.mjs';
 import { randomUUID } from 'node:crypto';
@@ -16,7 +18,17 @@ const summary = run => ({ id:run.id,status:run.status,name:run.name,createdAt:ru
 const json = v => JSON.stringify(v);
 
 export class ApiService {
-  constructor(store) { this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store)); }
+  constructor(store,{oauth}={}) { this.oauth=new OAuthSessions(store,oauth); this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store)); }
+  oauthStart(args){return this.oauth.start(args);}
+  oauthPoll(args){return this.oauth.poll(args);}
+  oauthCancel(args){return this.oauth.cancel(args);}
+  oauthRefresh(args){return this.oauth.refresh(args);}
+  async duplicateDocument({kind,id}){
+    if(!['collection','environment'].includes(kind))throw new Error('INVALID_KIND');
+    const source=await this.store.get(kind,id,{reveal:true});if(!source)throw new Error('NOT_FOUND');
+    const data=source.data;if(kind==='collection'){data.info.name+=' 副本';data.info._postman_id=randomUUID();}else{data.name+=' 副本';delete data.id;}
+    return this.put({kind,data});
+  }
   backupStart(args){return this.backups.start(args);}
   backupChunk(args){return this.backups.chunk(args);}
   backupFinish(args){return this.backups.finish(args);}
@@ -36,6 +48,7 @@ export class ApiService {
     if (kind==='collection') data=normalizeCollection(data);
     if (['environment','globals'].includes(kind) && !Array.isArray(data.values)) throw new Error('INVALID_VARIABLES');
     if(['environment','globals'].includes(kind))data={...data,values:data.values.map(v=>({...v,disabled:v.disabled??v.enabled===false}))};
+    data=markCredentials(data);
     if (kind==='settings') validateOptions({...DEFAULT_SETTINGS,...data});
     if(kind==='cookies'&&(!Array.isArray(data.cookies)||data.cookies.some(c=>!c||typeof c.key!=='string'||(typeof c.value!=='string'&&!c.secretRef))))throw new Error('INVALID_COOKIES');
     return this.store.put(kind,id,data,revision);
@@ -126,7 +139,8 @@ export class ApiService {
     return this.start({collectionId,itemId,environmentId},true);
   }
   async start({collectionId,itemId,environmentId,data=[],dataText,dataFormat='json',options={}},introspect=false) {
-    const settings=(await this.store.get('settings','default'))?.data||{};
+    const settingsDoc=await this.store.get('settings','default',{reveal:true});
+    const settings=settingsDoc?.data||{};
     options={...DEFAULT_SETTINGS,...settings,...options};validateOptions(options);
     if(this.active.size>=4)throw new Error('RUN_LIMIT: 同时最多运行 4 个集合');
     const collectionDoc=await this.store.get('collection',collectionId,{reveal:true});if(!collectionDoc)throw new Error('NOT_FOUND');
@@ -135,6 +149,7 @@ export class ApiService {
     const globalsDoc=await this.store.get('globals','default',{reveal:true});
     const cookiesDoc=await this.store.get('cookies','default',{reveal:true});
     const collection=selectCollection(collectionDoc.data,itemId), warnings=warningsFor(collection);
+    const validateNetwork=root=>{if(root.request)validateOptions({...options,...networkOf(root)});for(const child of root.item||[])validateNetwork(child);};validateNetwork(collection);
     options.singleRequest=!!(itemId&&findItem(collectionDoc.data,itemId)?.item.request);
     if(introspect){
       const item=findItem(collection,itemId)?.item;
@@ -149,12 +164,12 @@ export class ApiService {
     const owned=(await readdir(uploads).catch(()=>[])).map(p=>join(uploads,p));
     options.allowedFiles=[...owned,...(options.allowedFiles||[])].map(p=>resolve(p));
     const secretValues=[];
-    for(const d of [collectionDoc,environmentDoc,globalsDoc,cookiesDoc])if(d)await transformSecrets(d.data,v=>{secretValues.push(v.value);return v;});
+    for(const d of [collectionDoc,environmentDoc,globalsDoc,cookiesDoc,settingsDoc])if(d)await transformSecrets(d.data,v=>{secretValues.push(v.value);return v;});
     // Scripts receive the actual values, without implementation-specific Keychain references.
     const secretKeys={environment:[],globals:[],collectionVariables:[]};
     for(const [doc,scope]of [[environmentDoc,'environment'],[globalsDoc,'globals'],[collectionDoc,'collectionVariables']])if(doc)await transformSecrets(doc.data,v=>{secretKeys[scope].push(v.key);return v;});
     const resolved=async d=>transformSecrets(d||{},v=>{delete v.secretRef;v.type='string';delete v.sensitive;return v;});
-    const input={collection:await resolved(collection),environment:await resolved(environmentDoc?.data),globals:await resolved(globalsDoc?.data),cookies:await resolved(cookiesDoc?.data),data,options,secretKeys};
+    const input={collection:await resolved(collection),environment:await resolved(environmentDoc?.data),globals:await resolved(globalsDoc?.data),cookies:await resolved(cookiesDoc?.data),data,options:materializeNetwork(options),secretKeys};
     const run={id:randomUUID(),status:'running',name:collection.info.name,collectionId,itemId,environmentId,createdAt:new Date().toISOString(),responses:[],assertions:[],logs:[],errors:[],variableChanges:[]};
     const controller=new AbortController();this.store.saveRun(run);
     const cancellationPoll=setInterval(()=>{if(this.store.isCancelled(run.id))controller.abort();},200);
@@ -224,7 +239,7 @@ export class ApiService {
     if(own){own.controller.abort();await own.completion;}
     return this.result({runId});
   }
-  async close() { this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
+  async close() { this.oauth.close(); this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
 }
 function sanitize(value,secrets) {
   const encoded=[];
@@ -234,7 +249,7 @@ function sanitize(value,secrets) {
     const copy=Object.fromEntries(Object.entries(v).map(([k,x])=>[k,credentials(x)]));
     if(/^(authorization|proxy-authorization|cookie|set-cookie)$/i.test(String(v.key||''))&&typeof v.value==='string') {
       encoded.push(v.value);
-      if(/^Basic /i.test(v.value))encoded.push(v.value.slice(6));
+      if(/^(Basic|Bearer) /i.test(v.value))encoded.push(v.value.slice(v.value.indexOf(' ')+1));
       copy.value='••••••••';
     }
     for(const k of Object.keys(copy))if(/^(authorization|proxy-authorization|cookie|set-cookie)$/i.test(k)&&typeof v[k]==='string'){encoded.push(v[k]);copy[k]='••••••••';}
@@ -250,12 +265,16 @@ function sanitize(value,secrets) {
   return clean;
 }
 export function validateOptions(options) {
+  for(const key of ['strictSSL','followRedirects'])if(options[key]!==undefined&&typeof options[key]!=='boolean')throw new Error('NETWORK_INVALID: '+key+' 必须是布尔值');
+  if(options.noProxy!==undefined&&(!Array.isArray(options.noProxy)||options.noProxy.some(v=>typeof v!=='string')))throw new Error('NETWORK_INVALID: noProxy 需要匹配规则数组');
+  if(options.proxyCredentials!==undefined&&(!Array.isArray(options.proxyCredentials)||options.proxyCredentials.some(v=>!v||!['username','password'].includes(v.key))))throw new Error('NETWORK_INVALID: 代理凭据格式错误');
+
   for(const [key,min,max]of [['requestTimeout',1,300000],['scriptTimeout',1,60000],['runTimeout',100,600000],['iterations',1,1000],['delay',0,60000],['maxResponseSize',1,20*1024*1024]]) {
     if(options[key]!==undefined&&(!Number.isInteger(options[key])||options[key]<min||options[key]>max))throw new Error(`LIMIT: ${key} 必须是 ${min}–${max} 的整数`);
   }
   if(options.proxy){
     if(!/^http:\/\//.test(options.proxy))throw new Error('PROXY: 首版仅支持 HTTP 代理 URL');
-    const proxy=new URL(options.proxy);if(proxy.username||proxy.password)throw new Error('PROXY: 首版不支持带凭据的代理 URL');
+    const proxy=new URL(options.proxy);if(proxy.username||proxy.password)throw new Error('PROXY: 凭据请使用专用密码字段');
   }
 }
 

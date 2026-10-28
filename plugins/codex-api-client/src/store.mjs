@@ -1,3 +1,4 @@
+import {markCredentials} from './auth.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
@@ -38,7 +39,7 @@ export class Store {
       runs:this.db.prepare('SELECT * FROM runs ORDER BY id').all(),
     });
   }
-  async putMany(documents,{replace=false,history=[],expectedWorkspaceIdentity}={}) {
+  async putMany(documents,{replace=false,history=[],expectedWorkspaceIdentity,beforeCommit}={}) {
     const identity=replace?(expectedWorkspaceIdentity??this.workspaceIdentity()):undefined;
     const created=[],pending=[],prepared=[],keys=new Set();
     try {
@@ -46,6 +47,7 @@ export class Store {
       for(let {kind,id,data,expectedRevision} of documents){
         const key=JSON.stringify([kind,id]);if(keys.has(key))throw new Error('INVALID_DOCUMENT: 重复文档');keys.add(key);
         if(kind==='cookies')data={...data,cookies:(data.cookies||[]).map(c=>({...c,type:'secret'}))};
+        data=markCredentials(data);
         const original=this.row(kind,id);
         if((original?.revision??0)!==expectedRevision)throw new Error('CONFLICT: 内容已在其他会话更新，请重新加载后保存');
         const owned=new Set();
@@ -61,6 +63,7 @@ export class Store {
         prepared.push({kind,id,data:JSON.stringify(stored),expectedRevision});
       }
       // Prepare Keychain values first; the SQLite transaction contains only synchronous writes.
+      beforeCommit?.();
       this.db.exec('BEGIN IMMEDIATE');
       try {
         if(replace){

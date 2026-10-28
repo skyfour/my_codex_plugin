@@ -8,9 +8,15 @@ const options=z.object({
   runTimeout:z.number().int().positive().optional(),iterations:z.number().int().positive().optional(),
   delay:z.number().int().min(0).optional(),stopOnFailure:z.boolean().optional(),strictSSL:z.boolean().optional(),
   followRedirects:z.boolean().optional(),maxResponseSize:z.number().int().positive().optional(),
-  proxy:z.string().optional(),caFile:z.string().optional(),certificates:z.array(object).optional(),allowedFiles:z.array(z.string()).optional(),
+  proxy:z.string().optional(),noProxy:z.array(z.string()).optional(),proxyCredentials:z.array(object).optional(),caFile:z.string().optional(),certificates:z.array(object).optional(),allowedFiles:z.array(z.string()).optional(),
 }).strict();
+const oauthTarget=z.object({kind:z.enum(['environment','globals']),id,key:z.string().min(1).max(200)}).strict();
 export const TOOL_DEFINITIONS = [
+  ['api_oauth_start','App 专用：显式启动 OAuth2，Token 仅写入所选敏感变量。',z.object({flow:z.enum(['authorization_code','client_credentials']),authorizationUrl:z.string().optional(),tokenUrl:z.string(),clientId:z.string(),clientSecret:z.string().optional(),scope:z.string().optional(),target:oauthTarget}).strict(),'oauthStart',false,'app'],
+  ['api_oauth_poll','App 专用：读取脱敏授权状态。',z.object({sessionId:id}).strict(),'oauthPoll',true,'app'],
+  ['api_oauth_cancel','App 专用：取消授权并关闭回环监听。',z.object({sessionId:id}).strict(),'oauthCancel',false,'app'],
+  ['api_oauth_refresh','App 专用：刷新指定变量中的 Token。',z.object({target:oauthTarget}).strict(),'oauthRefresh',false,'app'],
+  ['api_document_duplicate','复制文档，凭据仅在后端重新保护。',z.object({kind:z.enum(['collection','environment']),id}).strict(),'duplicateDocument',false],
   ['api_backup_start','App 专用加密备份传输。',z.object({operation:z.enum(['export','import']),password:z.string().min(1).max(1024),includeHistory:z.boolean().optional(),mode:z.enum(['merge','replace']).optional(),context:z.object({selectedEnvironment:z.string().max(200).optional(),ui:z.object({theme:z.enum(['light','dark']).optional(),sidebarOpen:z.boolean().optional(),responseTab:z.string().max(30).optional()}).strict().optional()}).strict().optional()}).strict(),'backupStart',false,'app'],
   ['api_backup_chunk','App 专用加密归档分块。',z.object({transferId:id,offset:z.number().int().min(0).optional(),base64:z.string().max(1400000).optional()}).strict(),'backupChunk',false,'app'],
   ['api_backup_finish','App 专用预览或确认恢复。',z.object({transferId:id,decisions:z.record(z.string(),z.enum(['local','backup'])).optional()}).strict(),'backupFinish',false,'app'],

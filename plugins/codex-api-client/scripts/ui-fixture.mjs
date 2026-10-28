@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startPreview } from './dev.mjs';
 const directory=await mkdtemp(join(tmpdir(),'api-ui-'));
-const fixture=http.createServer(async(req,res)=>{const chunks=[];for await(const c of req)chunks.push(c);res.setHeader('Content-Type','application/json');const body=Buffer.concat(chunks).toString();if(req.url==='/graphql'&&body.includes('__schema'))return res.end(JSON.stringify({data:{__schema:{queryType:{name:'Query'},types:[{kind:'OBJECT',name:'Query',fields:[{name:'hello',args:[],type:{name:'String',kind:'SCALAR'}},{name:'world',args:[],type:{name:'String',kind:'SCALAR'}}]}]}}}));res.end(JSON.stringify({url:req.url,method:req.method,headers:req.headers,body}));});
+const fixture=http.createServer(async(req,res)=>{const chunks=[];for await(const c of req)chunks.push(c);res.setHeader('Content-Type','application/json');const body=Buffer.concat(chunks).toString();if(req.url==='/oauth/token')return res.end(JSON.stringify({access_token:'synthetic-ui-access',refresh_token:'synthetic-ui-refresh',token_type:'Bearer',expires_in:3600}));if(req.url==='/graphql'&&body.includes('__schema'))return res.end(JSON.stringify({data:{__schema:{queryType:{name:'Query'},types:[{kind:'OBJECT',name:'Query',fields:[{name:'hello',args:[],type:{name:'String',kind:'SCALAR'}},{name:'world',args:[],type:{name:'String',kind:'SCALAR'}}]}]}}}));res.end(JSON.stringify({url:req.url,method:req.method,headers:req.headers,body}));});
 await new Promise(r=>fixture.listen(47892,'127.0.0.1',r));
 const values=new Map();
 const secrets={async set(k,v){values.set(k,v);},async get(k){return values.get(k);},async delete(k){values.delete(k);}};

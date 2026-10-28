@@ -1,3 +1,4 @@
+import {materializeNetwork,networkOf,authProblem} from './auth.mjs';
 import {compatibilityMode} from './collections.mjs';
 import runtime from 'postman-runtime';
 import sdk from 'postman-collection';
@@ -18,7 +19,8 @@ process.once('message', input => {
 function run({ collection, environment = {}, globals = {}, cookies, data = [], options = {}, secretKeys = {} }) {
   // Postman v2.1 has no native folder-variable scope. Expose our folder variables
   // as temporary variables, restoring the previous local scope between items.
-  const folderScopes={};
+  const folderScopes={},networks={};
+  const visitNetworks=root=>{if(root.request){const network=networkOf(root);networks[root.id]=materializeNetwork({...options,...network});for(const key of ['strictSSL','followRedirects'])if(network[key]!==undefined)root.protocolProfileBehavior={...root.protocolProfileBehavior,[key]:network[key]};}for(const child of root.item||[])visitNetworks(child);};visitNetworks(collection);
   const visitScopes=(root,inherited=[])=>{
     const scope=root.item&&root!==collection?[...inherited,...(root.variable||[])]:inherited;
     for(const item of root.item||[])if(item.item)visitScopes(item,scope);else folderScopes[item.id]=scope;
@@ -70,6 +72,11 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
       if(values.length)send('secrets',values);
     }
   };
+  const proxiesFor=o=>new sdk.ProxyConfigList({},o.proxy?[{match:'http+https://*:*/*',host:new URL(o.proxy).hostname,port:Number(new URL(o.proxy).port)||80,protocol:'http',tunnel:true,authenticate:!!(o.proxyUsername||o.proxyPassword),username:o.proxyUsername,password:o.proxyPassword,bypass:o.noProxy||[]}]:[]);
+  for(const o of Object.values(networks)){
+    if(o.caFile)permit(o.caFile);
+    for(const c of o.certificates||[])for(const field of ['cert','key','pfx'])if(c[field]?.src)permit(c[field].src);
+  }
   const config = {
     disableSNR: options.singleRequest === true,
     timeout: { request: options.requestTimeout ?? 30000, script: options.scriptTimeout ?? 5000 },
@@ -86,13 +93,27 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
       implicitTraceHeader:false, implicitCacheControl:false,
     },
     certificates: new sdk.CertificateList({}, options.certificates || []),
-    proxies: new sdk.ProxyConfigList({}, options.proxy ? [{match:'http+https://*:*/*',host:new URL(options.proxy).hostname,port:Number(new URL(options.proxy).port)||8080,tunnel:true}] : []),
+    proxies: proxiesFor(options),ignoreProxyEnvironmentVariables:true,
   };
   if (options.caFile) permit(options.caFile);
   new runtime.Runner().run(c, config, (error, active) => {
     if (error) { reportError(error); return send('done',{status:'failed'}); }
+    let baseRequester;
+    const applyNetwork=id=>{
+      const o=networks[id]||options;
+      baseRequester||={...active.requester.options};
+      // Runner processes items serially. Reset each item, including auth replays;
+      // requester creation snapshots these options for that HTTP operation.
+      active.options.proxies=proxiesFor(o);
+      active.options.certificates=new sdk.CertificateList({},o.certificates||[]);
+      Object.assign(active.requester.options,baseRequester,{timeout:o.requestTimeout,strictSSL:o.strictSSL!==false,followRedirects:o.followRedirects!==false,ignoreProxyEnvironmentVariables:true,extendedRootCA:o.caFile?fs.readFileSync(o.caFile):undefined});
+    };
     active.start({
-      beforeItem(error,cursor,item) { reportError(error,cursor,item); send('progress',{cursor,itemId:item.id,name:item.name}); },
+      beforeItem(error,cursor,item) { applyNetwork(item.id); reportError(error,cursor,item); send('progress',{cursor,itemId:item.id,name:item.name}); },
+      beforeRequest(error,cursor,sent,item,aborter){
+        const problem=authProblem(sent.auth?.toJSON?.());
+        if(problem){reportError(new Error(problem),cursor,item);aborter.abort();}
+      },
       prerequest:scriptsDone, test:scriptsDone,
       exception(cursor,error) { reportError(error,cursor); },
       assertion(cursor,assertions) {
@@ -101,6 +122,9 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
       console(cursor,level,...messages) { send('log',{cursor,level,messages}); },
       request(error,cursor,response,sent,item,cookies) {
         reportError(error,cursor,item);
+        const auth=sent?.auth?.toJSON?.(),type=auth?.type,params=Object.fromEntries((auth?.[type]||[]).map(v=>[v.key,v.value]));
+        const secretQuery=type==='jwt'?[params.queryParamKey||'token']:type==='oauth2'?['access_token']:type==='apikey'&&params.in==='query'?[params.key]:type==='awsv4'?['X-Amz-Signature','X-Amz-Security-Token']:type==='oauth1'?['oauth_signature','oauth_token']:[];
+        const querySecrets=secretQuery.map(key=>sent.url.query.get(key)).filter(Boolean);if(querySecrets.length)send('secrets',querySecrets);
         if (response) send('response', {
           itemId:item?.id, name:item?.name, cursor, code:response.code, status:response.status,
           time:response.responseTime, size:response.size(), headers:response.headers.toJSON(),

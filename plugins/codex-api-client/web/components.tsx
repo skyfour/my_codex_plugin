@@ -1,3 +1,4 @@
+import {AUTH_FIELDS,AUTH_SECRETS,AUTH_BOOLEANS,AUTH_DEFAULTS,AUTH_REQUIRED} from '../src/auth.mjs';
 import {useEffect,useRef,type ReactNode} from 'react';
 export type Row={id?:string,key:string,value?:string,type?:string,disabled?:boolean,secretRef?:string,src?:string,description?:string};
 export function Rows({rows,onChange,variables=false,files=false,onUpload,onUploaded}:{rows:Row[],onChange:(rows:Row[])=>void,variables?:boolean,files?:boolean,onUpload?:(file:File)=>Promise<string>,onUploaded?:(id:string,path:string)=>void}){
@@ -35,10 +36,11 @@ export function Modal({title,children,onClose,wide=false,className=''}:{title:st
 }
 export function AuthEditor({auth,onChange}:{auth:any,onChange:(auth:any)=>void}){
   const type=auth?.type||'inherit';
-  const keys:Record<string,string[]>={basic:['username','password'],bearer:['token'],apikey:['key','value','in']};
+  const keys=AUTH_FIELDS as Record<string,string[]>;
   const labels:Record<string,string>={username:'用户名',password:'密码',token:'Token',key:'参数名',value:'参数值',in:'添加位置'};
-  return <div className="auth-editor"><label>认证方式<select aria-label="认证方式" value={type} onChange={e=>onChange(e.target.value==='inherit'?undefined:{type:e.target.value,[e.target.value]:(keys[e.target.value]||[]).map(key=>({key,value:key==='in'?'header':''}))})}><option value="inherit">继承上级认证</option><option value="noauth">No Auth</option><option value="basic">Basic Auth</option><option value="bearer">Bearer Token</option><option value="apikey">API Key</option></select></label>
-  {(keys[type]||[]).map(key=>{const entry=auth[type]?.find((v:Row)=>v.key===key);return <label key={key}>{labels[key]}{key==='in'?<select aria-label={labels[key]} value={entry?.value||'header'} onChange={e=>update(key,e.target.value)}><option value="header">Header</option><option value="query">Query</option></select>:<input aria-label={labels[key]} type={key==='password'||key==='token'||key==='value'?'password':'text'} value={entry?.value||''} placeholder="支持 {{环境变量}}" onChange={e=>update(key,e.target.value)}/>}</label>;})}
-  {type==='inherit'&&<p className="muted">使用最近一级文件夹或集合的认证配置。</p>}</div>;
-  function update(key:string,value:string){onChange({...auth,[type]:(keys[type]||[]).map(k=>k===key?{...auth[type]?.find((v:Row)=>v.key===k),key:k,value}:auth[type]?.find((v:Row)=>v.key===k)||{key:k,value:''})});}
+  const defaults=AUTH_DEFAULTS as Record<string,Record<string,any>>;
+  return <div className="auth-editor"><label>认证方式<select aria-label="认证方式" value={type} onChange={e=>onChange(e.target.value==='inherit'?undefined:{type:e.target.value,[e.target.value]:(keys[e.target.value]||[]).map(key=>({key,value:defaults[e.target.value]?.[key]??''}))})}><option value="inherit">继承上级认证</option>{Object.keys(keys).map(k=><option key={k} value={k}>{({noauth:'No Auth',basic:'Basic Auth',bearer:'Bearer Token',apikey:'API Key',awsv4:'AWS Signature v4'} as Record<string,string>)[k]||k.toUpperCase()}</option>)}</select></label>
+  {(keys[type]||[]).map(key=>{const entry=auth[type]?.find((v:Row)=>v.key===key),label=labels[key]||key;return <label key={key}>{label}{key==='in'?<select aria-label={label} value={entry?.value||'header'} onChange={e=>update(key,e.target.value)}><option value="header">Header</option><option value="query">Query</option></select>:AUTH_BOOLEANS.includes(key)?<input aria-label={label} type="checkbox" checked={entry?.value===true} onChange={e=>update(key,e.target.checked)}/>:<input aria-label={label} type={AUTH_SECRETS.includes(key)?'password':'text'} value={entry?.value??''} placeholder="支持 {{环境变量}}" onChange={e=>update(key,e.target.value)}/>}</label>;})}
+  {type==='inherit'?<p className="muted">使用最近一级文件夹或集合的认证配置。</p>:<p className="muted">必需字段：{((AUTH_REQUIRED as Record<string,string[]>)[type]||[]).join(', ')||'无'}。字段使用已安装 Postman 运行时的名称。密钥保存到系统钥匙串；缺少必需字段时阻止发送。JWT 使用 HS256/384/512 的 secret 或 RS/PS/ES 的 PKCS8 privateKey；OAuth1 使用 consumerKey、签名方法和 secret/privateKey；OAuth2 accessToken 支持变量引用。</p>}</div>;
+  function update(key:string,value:any){const entries=auth[type]||[];onChange({...auth,[type]:entries.some((v:Row)=>v.key===key)?entries.map((v:Row)=>v.key===key?{...v,value}:v):[...entries,{key,value}]});}
 }

@@ -69,6 +69,10 @@ test('client certificate authenticates an mTLS server and HTTP proxy receives re
   const collection={info:{name:'mTLS'},item:[{name:'cert',request:{url:`https://localhost:${server.address().port}`,method:'GET'}}]};
   const result=await executeCollection({collection,options:{caFile:cert,allowedFiles:[cert,key],certificates:[{name:'local',matches:[`https://localhost:${server.address().port}/*`],key:{src:key},cert:{src:cert}}]}});
   assert.equal(result.status,'completed',JSON.stringify(result.errors));assert.equal(result.responses[0].body,'client accepted');
+  const scoped=structuredClone(collection);scoped.item[0].id='scoped';scoped.item[0]['x-codex-api-client']={network:{caFile:cert,certificates:[{matches:[`https://localhost:${server.address().port}/*`],key:{src:key},cert:{src:cert}}]}};
+  scoped.item.push({id:'no-cert',name:'no-cert',request:{url:`https://localhost:${server.address().port}`,method:'GET'}});
+  const mixed=await executeCollection({collection:scoped,options:{allowedFiles:[cert,key]}});assert.deepEqual(mixed.responses.map(r=>r.itemId),['scoped']);assert.ok(mixed.errors.some(e=>e.itemId==='no-cert'));
+
   const proxy=http.createServer((req,res)=>res.end('proxied '+req.url));
   // Runtime uses CONNECT tunnels for explicit proxies, including HTTP requests.
   const net=await import('node:net');

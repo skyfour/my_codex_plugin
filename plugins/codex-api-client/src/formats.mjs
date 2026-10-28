@@ -1,3 +1,4 @@
+import {authProblem} from './auth.mjs';
 import {parseSpecText,importOpenApi,importHar} from './spec-import.mjs';
 import { parse as shellParse } from 'shell-quote';
 import { parse as csvParse } from 'csv-parse/sync';
@@ -8,7 +9,7 @@ export function warningsFor(value) {
   const warnings = new Set();
   function visit(v) {
     if (!v || typeof v !== 'object') return;
-    if (v.auth?.type && !['noauth', 'basic', 'bearer', 'apikey'].includes(v.auth.type)) warnings.add(`不支持认证方式 ${v.auth.type}，请改为常用认证或脚本`);
+    if (v.auth?.type && authProblem(v.auth)) warnings.add(authProblem(v.auth));
     if (v.script) {
       const script = [].concat(v.script.exec || []).join('\n');
       if (/pm\.(vault|require)\b/.test(script)) warnings.add('脚本使用 Vault 或云脚本包，首版不支持');
