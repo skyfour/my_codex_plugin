@@ -1,7 +1,7 @@
 {
   "name": "codex-api-client",
-  "version": "0.2.1",
-  "description": "Local Postman-style API debugging with collections, environments and Postman scripts.",
+  "version": "0.3.0",
+  "description": "Local API debugging with Postman scripts, multiple protocols and encrypted workspace backups.",
   "author": {
     "name": "Local developer"
   },
@@ -9,8 +9,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Codex API Client",
-    "shortDescription": "本地接口调试、Postman 脚本与集合运行",
-    "longDescription": "在 Codex 内编辑 HTTP 请求、管理本地集合与环境、运行 Postman 脚本并检查响应和断言。",
+    "shortDescription": "本地多协议调试、Postman 脚本与加密迁移",
+    "longDescription": "在 Codex 内管理集合与环境，运行 Postman 脚本，调试 HTTP、GraphQL 和交互协议，使用密码加密备份迁移本地配置与凭据。",
     "developerName": "Local developer",
     "category": "developer-tools",
     "capabilities": [

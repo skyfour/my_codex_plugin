@@ -40,3 +40,10 @@ test('Basic credentials and session cookies are protected in history, SQLite and
   assert.equal((await readFile(join(dir,'workspace.sqlite-wal'))).includes(Buffer.from(password)),false);
   assert.equal((await readFile(join(dir,'workspace.sqlite-wal'))).includes(Buffer.from(basic)),false);
 });
+test('collection script final scope persists set unset and secrets into the next Send',async t=>{
+ const {store,service}=await setup(t),seen=[];
+ const server=http.createServer((req,res)=>{seen.push(req.url);res.end('ok');});await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
+ const doc=await service.put({kind:'collection',data:{info:{name:'scope'},variable:[{key:'count',value:'0'},{key:'removed',value:'old'},{key:'token',value:'initial-secret',type:'secret'}],item:[{id:'write',request:{url:`http://127.0.0.1:${server.address().port}/write`},event:[{listen:'test',script:{exec:['pm.collectionVariables.set("count","1");pm.collectionVariables.set("count","2");pm.collectionVariables.unset("count");pm.collectionVariables.set("count","3");pm.collectionVariables.unset("removed");pm.collectionVariables.set("token","final-secret");']}}]},{id:'read',request:{url:`http://127.0.0.1:${server.address().port}/{{count}}/{{token}}`}}]}});
+ for(const itemId of ['write','read']){const {runId}=await service.start({collectionId:doc.id,itemId,singleRequest:true});let run;for(let i=0;i<300;i++){run=await service.result({runId,includeBodies:true});if(run.status!=='running')break;await new Promise(r=>setTimeout(r,20));}assert.equal(run.status,'completed',JSON.stringify(run.errors));assert.ok(!JSON.stringify(run).includes('final-secret'));}
+ assert.deepEqual(seen,['/write','/3/final-secret']);const values=(await store.get('collection',doc.id,{reveal:true})).data.variable;assert.equal(values.find(v=>v.key==='count').value,'3');assert.ok(!values.some(v=>v.key==='removed'));assert.equal(values.find(v=>v.key==='token').type,'secret');
+});

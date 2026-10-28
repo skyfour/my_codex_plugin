@@ -1,11 +1,22 @@
+import {validateSettings} from './document-validation.mjs';
+import {ProtocolSessions} from './protocol-sessions.mjs';
+import {webAdapters,validateWebConfig} from './protocol-web.mjs';
+import {grpcAdapter,grpcDefinition} from './protocol-grpc.mjs';
+import {mqttAdapter} from './protocol-mqtt.mjs';
+import {mcpAdapter} from './protocol-mcp.mjs';
+import {OAuthSessions} from './oauth.mjs';
+import {materializeNetwork,networkOf,markCredentials,authProblem,validateOptions} from './auth.mjs';
+import {BackupService} from './backup.mjs';
+import {BackupTransfer} from './backup-transfer.mjs';
 import { randomUUID } from 'node:crypto';
+import {constants as fsConstants} from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { mkdir, writeFile, readdir } from 'node:fs/promises';
+import { mkdir, writeFile, readdir, realpath, open, lstat } from 'node:fs/promises';
 import { executeCollection } from './execution.mjs';
 import { normalizeCollection, findItem, moveItem, duplicateItem, selectCollection } from './collections.mjs';
 import { importDocument, exportCurl, parseData, warningsFor } from './formats.mjs';
 import { isSecret, redact, transformSecrets } from './secrets.mjs';
-import {WORKSPACE_FORMAT,TRANSFER_LIMIT,workspacePreview,portableData,uniqueName,parseWorkspace} from './workspace-transfer.mjs';
+import {WORKSPACE_FORMAT,TRANSFER_LIMIT,workspacePreview,portableData,sanitizedPortableData,portableSettings,uniqueName,parseWorkspace} from './workspace-transfer.mjs';
 
 export const DEFAULT_SETTINGS = { requestTimeout:30000, scriptTimeout:5000, runTimeout:120000, strictSSL:true, followRedirects:true, delay:0 };
 const kinds = ['collection','environment','globals','settings','cookies'];
@@ -14,7 +25,106 @@ const summary = run => ({ id:run.id,status:run.status,name:run.name,createdAt:ru
 const json = v => JSON.stringify(v);
 
 export class ApiService {
-  constructor(store) { this.store=store; this.active=new Map(); }
+  constructor(store,{oauth}={}) { this.protocols=new ProtocolSessions({...webAdapters,grpc:grpcAdapter,mqtt:mqttAdapter,mcp:mcpAdapter}); this.oauth=new OAuthSessions(store,oauth); this.store=store; this.active=new Map(); this.backups=new BackupTransfer(new BackupService(store));
+    this.starting=0;this.pendingStarts=new Set();
+    for(const name of ['start','protocolConnect','oauthStart','oauthRefresh']){
+      const operation=this[name].bind(this);
+      this[name]=async(...args)=>{if(this.restoring||this.closed)throw Error('WORKSPACE_BUSY');this.starting++;const pending=operation(...args);this.pendingStarts.add(pending);try{return await pending;}finally{this.starting--;this.pendingStarts.delete(pending);}};
+    }
+  }
+  cookieDomain(value){const domain=value.toLowerCase().replace(/^\./,'');if(!/^[a-z0-9][a-z0-9.-]*$/.test(domain)||domain.includes('..'))throw Error('COOKIE_DOMAIN_INVALID');return domain;}
+  async cookiesGet({domain}){domain=this.cookieDomain(domain);const doc=await this.store.get('cookies','default',{reveal:true});return {domain,revision:doc?.revision||0,cookies:(doc?.data.cookies||[]).filter(c=>this.cookieDomain(c.domain||'')===domain).map(({secretRef,type,sensitive,domain,...c})=>c)};}
+  async cookiesEdit({domain,revision,cookies}){
+    domain=this.cookieDomain(domain);
+    const doc=await this.store.get('cookies','default',{reveal:true});
+    const seen=new Set();
+    for(const c of cookies){const identity=c.path+'\0'+c.key;if(seen.has(identity)||/[\x00-\x20;=]/.test(c.key)||/[\r\n;]/.test(c.value)||(c.expires&&c.expires!=='Infinity'&&!Number.isFinite(Date.parse(c.expires))))throw Error('COOKIE_INVALID');seen.add(identity);}
+    const data={...doc?.data,cookies:[...(doc?.data.cookies||[]).filter(c=>this.cookieDomain(c.domain||'')!==domain),...cookies.map(c=>({...c,domain,hostOnly:c.hostOnly!==false}))]};
+    return this.put({kind:'cookies',id:'default',revision,data});
+  }
+  async protocolConnect({collectionId,itemId,environmentId}) {
+    const collection=await this.store.get('collection',collectionId,{reveal:true});
+    const found=findItem(collection?.data||{},itemId);if(!found?.item.request)throw Error('NOT_FOUND');
+    const request=found.item.request,config=request['x-codex-api-client']?.protocol;
+    if(!config||config.version!==1)throw Error('PROTOCOL_CONFIG_INVALID: 需要 version=1');
+    const globals=await this.store.get('globals','default',{reveal:true}),environment=environmentId?await this.store.get('environment',environmentId,{reveal:true}):null;
+    if(environmentId&&!environment)throw Error('NOT_FOUND: 环境不存在');
+    const settings=await this.store.get('settings','default',{reveal:true});
+    const secrets=[];for(const doc of [collection,globals,environment,settings])if(doc)await transformSecrets(doc.data,v=>{secrets.push(v.value);return v;});
+    const variables={};for(const rows of [globals?.data.values,collection.data.variable,...(collection.data['x-codex-api-client']?.compatibilityMode==='extended'?found.parents.map(p=>p.variable):[]),environment?.data.values])for(const row of rows||[])if(!row.disabled)variables[row.key]=row.value;
+    const resolve=v=>{if(typeof v==='string')return v.replace(/{{([^{}]+)}}/g,(_,key)=>{if(!(key in variables))throw Error('PROTOCOL_VARIABLE_UNRESOLVED');return String(variables[key]);});if(Array.isArray(v))return v.map(resolve);if(v&&typeof v==='object'){if(isSecret(v))return {...v,value:resolve(v.value)};return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,resolve(x)]));}return v;};
+    const headers={};for(const row of resolve(request.header||[]))if(!row.disabled)headers[row.key]=row.value;
+    const auth=resolve(request.auth||[collection.data,...found.parents].map(p=>p.auth).filter(Boolean).at(-1));
+    if(authProblem(auth))throw Error('PROTOCOL_AUTH_INVALID: 认证字段不完整或不支持');
+    if(auth&&auth.type!=='noauth'){
+      const p=Object.fromEntries((auth[auth.type]||[]).filter(v=>!v.disabled).map(v=>[v.key,v.value]));
+      if(auth.type==='basic')headers.Authorization='Basic '+Buffer.from(p.username+':'+p.password).toString('base64');
+      else if(auth.type==='bearer'||auth.type==='oauth2'){
+        if(auth.type==='oauth2'&&p.addTokenTo&&p.addTokenTo!=='header')throw Error('PROTOCOL_AUTH_UNSUPPORTED');
+        headers.Authorization=(p.headerPrefix||'Bearer')+' '+(p.token||p.accessToken||'');
+      }else if(auth.type==='apikey'&&p.in==='header')headers[p.key]=p.value;
+      else throw Error('PROTOCOL_AUTH_UNSUPPORTED: 此适配器支持 Basic/Bearer/OAuth2/header API key');
+    }
+    for(const [key,value]of Object.entries(headers))if(/authorization|cookie|api.?key|token/i.test(key)){secrets.push(value);if(/^(Basic|Bearer) /i.test(value))secrets.push(value.slice(value.indexOf(' ')+1));}
+    const network=resolve(materializeNetwork({...DEFAULT_SETTINGS,...settings?.data,...networkOf(found.item)}));
+    validateOptions(network);
+    const runtime={...resolve(config),url:resolve(typeof request.url==='string'?request.url:request.url?.raw||''),headers,network,secrets};runtime.connectTimeout??=network.requestTimeout;
+    if(runtime.auth)runtime.auth=Object.fromEntries(Object.entries(runtime.auth).map(([k,v])=>[k,isSecret(v)?v.value:v]));
+    if(['grpc','mqtt','mcp'].includes(runtime.type))await this.prepareNativeProtocol(runtime);else validateWebConfig(runtime);return this.protocols.connect(runtime);
+  }
+  async prepareNativeProtocol(c){
+    const common=['version','type','url','headers','network','secrets','connectTimeout','operationTimeout','tls'];
+    const extra={grpc:['protoFiles','protoEntry','reflection','metadata'],mqtt:['username','password','clientId','reconnectAttempts','reconnectDelay'],mcp:['transport']}[c.type];
+    for(const key of Object.keys(c))if(![...common,...extra].includes(key))throw Error('PROTOCOL_CONFIG_UNSUPPORTED');
+    let url;try{url=new URL(c.url);}catch{throw Error('PROTOCOL_URL_INVALID');}
+    if(url.username||url.password)throw Error('PROTOCOL_URL_CREDENTIALS');
+    if(!({grpc:['grpc:','grpcs:'],mqtt:['mqtt:','mqtts:'],mcp:['http:','https:']}[c.type]).includes(url.protocol))throw Error('PROTOCOL_URL_INVALID');
+    if(['grpc','mqtt'].includes(c.type)&&(url.pathname&&url.pathname!=='/'||url.search||url.hash))throw Error('PROTOCOL_URL_INVALID');
+    for(const [key,min,max]of [['connectTimeout',1,300000],['operationTimeout',1,300000],['reconnectAttempts',0,3],['reconnectDelay',0,60000]])if(c[key]!==undefined&&(!Number.isInteger(c[key])||c[key]<min||c[key]>max))throw Error('PROTOCOL_CONFIG_INVALID');
+    if(c.network.proxy||c.network.proxyCredentials?.length||c.network.noProxy?.length||c.network.caFile||c.network.certificates?.length)throw Error('PROTOCOL_NETWORK_UNSUPPORTED: 原生协议使用专用 TLS 文件配置，不支持 HTTP 代理');
+    if(c.type==='mcp'&&(c.tls||c.network.strictSSL===false))throw Error('PROTOCOL_NETWORK_UNSUPPORTED: MCP 使用系统 TLS');
+    if(c.type==='mcp'&&!['http','sse'].includes(c.transport||'http'))throw Error('PROTOCOL_CONFIG_INVALID');
+    if(c.type==='grpc'&&c.network.strictSSL===false)throw Error('PROTOCOL_NETWORK_UNSUPPORTED: gRPC 必须验证 TLS');
+    const uploads=join(this.store.directory,'uploads'),owned=(await readdir(uploads).catch(()=>[])).map(p=>join(uploads,p));
+    const permitted=new Set([...owned,...(c.network.allowedFiles||[])].map(p=>resolve(p)));
+    const file=async path=>{
+      if(typeof path!=='string'||!permitted.has(resolve(path)))throw Error('PROTOCOL_FILE_FORBIDDEN');
+      let handle;try{const actual=await realpath(path);if((await lstat(path)).isSymbolicLink())throw Error();handle=await open(actual,fsConstants.O_RDONLY|fsConstants.O_NOFOLLOW);const info=await handle.stat();if(!info.isFile()||info.size>1024*1024)throw Error();const buffer=Buffer.alloc(1024*1024+1),{bytesRead}=await handle.read(buffer,0,buffer.length,0);if(bytesRead>1024*1024)throw Error();return buffer.subarray(0,bytesRead);}catch{throw Error('PROTOCOL_FILE_INVALID');}finally{await handle?.close();}
+    };
+    if(c.tls){if(typeof c.tls!=='object'||Array.isArray(c.tls)||Object.keys(c.tls).some(k=>!['caFile','certFile','keyFile','passphrase'].includes(k)))throw Error('PROTOCOL_CONFIG_INVALID');if(!['grpcs:','mqtts:'].includes(url.protocol))throw Error('PROTOCOL_TLS_REQUIRES_SECURE_URL');if(!!c.tls.certFile!==!!c.tls.keyFile)throw Error('PROTOCOL_TLS_CERT_KEY_REQUIRED');c.tlsBytes={};for(const [key,path]of Object.entries(c.tls))if(key.endsWith('File'))c.tlsBytes[key.slice(0,-4)]=await file(path);if(c.tls.passphrase)c.tlsBytes.passphrase=isSecret(c.tls.passphrase)?c.tls.passphrase.value:c.tls.passphrase;if(c.type==='grpc'&&c.tlsBytes.passphrase)throw Error('PROTOCOL_TLS_PASSPHRASE_UNSUPPORTED: gRPC 需要未加密 PEM key');if(c.tlsBytes.key)c.secrets.push(c.tlsBytes.key.toString());}
+    for(const key of ['username','password'])if(c[key]!==undefined){c[key]=isSecret(c[key])?c[key].value:c[key];if(typeof c[key]!=='string')throw Error('PROTOCOL_CONFIG_INVALID');c.secrets.push(c[key]);}
+    if(c.type==='mqtt'&&Object.keys(c.headers).length)throw Error('PROTOCOL_AUTH_UNSUPPORTED: MQTT 使用专用 username/password');
+    if(c.clientId!==undefined&&(typeof c.clientId!=='string'||c.clientId.length>128))throw Error('PROTOCOL_CONFIG_INVALID');
+    if(c.metadata!==undefined&&(!Array.isArray(c.metadata)||c.metadata.length>100||c.metadata.some(row=>!row||typeof row.key!=='string'||!/^([0-9a-z_.-]+)$/.test(row.key)||typeof row.value!=='string')))throw Error('PROTOCOL_METADATA_INVALID');
+    for(const row of c.metadata||[])if(!row.disabled){c.secrets.push(row.value);if(row.key.endsWith('-bin')){if(!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(row.value))throw Error('PROTOCOL_METADATA_INVALID');c.secrets.push(Buffer.from(row.value,'base64'));}}
+    if(c.type==='grpc'){
+      if(c.reflection!==undefined&&typeof c.reflection!=='boolean')throw Error('PROTOCOL_CONFIG_INVALID');
+      if(c.reflection){if(c.protoFiles?.length)throw Error('PROTOCOL_PROTO_SOURCE_CONFLICT');}
+      else {if(!Array.isArray(c.protoFiles)||!c.protoFiles.length||c.protoFiles.length>100||typeof c.protoEntry!=='string')throw Error('PROTOCOL_PROTO_REQUIRED');const files=new Map();for(const entry of c.protoFiles){if(!entry||typeof entry.name!=='string'||!/^[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/.test(entry.name)||entry.name.split('/').some(v=>v==='.'||v==='..')||files.has(entry.name))throw Error('PROTOCOL_PROTO_NAME_INVALID');files.set(entry.name,(await file(entry.path)).toString('utf8'));}if([...files.values()].reduce((n,s)=>n+Buffer.byteLength(s),0)>10*1024*1024)throw Error('PROTOCOL_PROTO_LIMIT');c.definition=grpcDefinition(files,c.protoEntry);}
+    }
+  }
+  protocolAction(args){return this.protocols.action(args);}
+  protocolEvents(args){return this.protocols.events(args);}
+  protocolDisconnect(args){return this.protocols.disconnect(args);}
+  oauthStart(args){return this.oauth.start(args);}
+  oauthPoll(args){return this.oauth.poll(args);}
+  oauthCancel(args){return this.oauth.cancel(args);}
+  oauthRefresh(args){return this.oauth.refresh(args);}
+  async duplicateDocument({kind,id}){
+    if(!['collection','environment'].includes(kind))throw new Error('INVALID_KIND');
+    const source=await this.store.get(kind,id,{reveal:true});if(!source)throw new Error('NOT_FOUND');
+    const data=source.data;if(kind==='collection'){data.info.name+=' 副本';data.info._postman_id=randomUUID();}else{data.name+=' 副本';delete data.id;}
+    return this.put({kind,data});
+  }
+  backupStart(args){return this.backups.start(args);}
+  backupChunk(args){return this.backups.chunk(args);}
+  async backupFinish(args){
+    const session=this.backups.sessions.get(args.transferId);
+    if(!session?.previewId)return this.backups.finish(args);
+    if(this.restoring||this.starting||this.active.size||[...this.protocols.sessions.values()].some(s=>s.cleanupPending||!['closed','failed'].includes(s.state))||[...this.oauth.sessions.values()].some(s=>s.status==='pending'||s.exchanging))throw Error('WORKSPACE_BUSY: 请先停止运行、协议连接和 OAuth 授权，再恢复');
+    this.restoring=true;try{return await this.backups.finish(args);}finally{this.restoring=false;}
+  }
+  backupCancel(args){return this.backups.cancel(args);}
   async state() {
     const [collections,environments,globals,settings,cookies]=await Promise.all(['collection','environment','globals','settings','cookies'].map(k=>this.store.list(k)));
     return {collections,environments,globals:globals[0]||null,settings:settings[0]||null,cookies:cookies[0]||null,history:this.store.listRuns().map(summary),defaults:DEFAULT_SETTINGS};
@@ -30,31 +140,33 @@ export class ApiService {
     if (kind==='collection') data=normalizeCollection(data);
     if (['environment','globals'].includes(kind) && !Array.isArray(data.values)) throw new Error('INVALID_VARIABLES');
     if(['environment','globals'].includes(kind))data={...data,values:data.values.map(v=>({...v,disabled:v.disabled??v.enabled===false}))};
-    if (kind==='settings') validateOptions({...DEFAULT_SETTINGS,...data});
+    data=markCredentials(data);
+    if (kind==='settings') validateSettings({...DEFAULT_SETTINGS,...data});
     if(kind==='cookies'&&(!Array.isArray(data.cookies)||data.cookies.some(c=>!c||typeof c.key!=='string'||(typeof c.value!=='string'&&!c.secretRef))))throw new Error('INVALID_COOKIES');
     return this.store.put(kind,id,data,revision);
   }
   async remove({kind,id,revision}) { assertKind(kind); return this.store.remove(kind,id,revision); }
-  async import({text}) {
-    const {kind,data,warnings}=importDocument(text);
+  async import({text,localFiles}) {
+    const {kind,data,warnings}=await importDocument(text,{localFiles});
     if(kind==='workspace')return this.importWorkspace(data);
     return {document:await this.put({kind,data}),warnings};
   }
-  async previewImport({text}) {
-    const imported=importDocument(text);
+  async previewImport({text,localFiles}) {
+    const imported=await importDocument(text,{localFiles});
     if(imported.kind==='workspace')return {...workspacePreview(imported.data),warnings:imported.warnings};
-    return {kind:imported.kind,collectionCount:imported.kind==='collection'?1:0,environmentCount:imported.kind==='environment'?1:0,warnings:imported.warnings};
+    return {kind:imported.kind,collectionCount:imported.kind==='collection'?1:0,environmentCount:imported.kind==='environment'?1:0,warnings:imported.warnings,...(imported.kind==='collection'?collectionPreview(imported.data):{})};
   }
   async exportWorkspace() {
     const collections=await this.store.list('collection'),environments=await this.store.list('environment');
     const data={format:WORKSPACE_FORMAT,version:1,createdAt:new Date().toISOString(),collections:[],environments:[],globals:null};
     // Export the captured document snapshots, without resolving credentials from Keychain.
-    data.collections=await Promise.all(collections.map(c=>portableData(c.data)));
-    data.environments=await Promise.all(environments.map(e=>portableData(e.data)));
-    const globals=await this.store.get('globals','default');if(globals)data.globals=await portableData(globals.data);
+    data.collections=await Promise.all(collections.map(c=>sanitizedPortableData(c.data)));
+    data.environments=await Promise.all(environments.map(e=>sanitizedPortableData(e.data)));
+    const globals=await this.store.get('globals','default');if(globals)data.globals=await sanitizedPortableData(globals.data);
+    const settings=await this.store.get('settings','default');if(settings)data.settings=await sanitizedPortableData(portableSettings(settings.data));
     parseWorkspace(data);
     if(Buffer.byteLength(JSON.stringify(data,null,2),'utf8')>TRANSFER_LIMIT)throw new Error('EXPORT_LIMIT: 工作区备份超过 20 MB');
-    return {data,name:'api-client-workspace-'+new Date().toISOString().slice(0,10)+'.json',warnings:['已标记的敏感变量仅保留名称；本地附件、Cookie、历史和机器设置不包含在备份中。']};
+    return {data,name:'api-client-workspace-'+new Date().toISOString().slice(0,10)+'.json',warnings:['已标记的敏感变量仅保留名称；Cookie 值、历史、证书和附件文件不包含；文件需重新选择。脚本中的硬编码秘密需自行检查。']};
   }
   async importWorkspace(data) {
     const entries=[],warnings=[],collections=await this.store.list('collection'),environments=await this.store.list('environment');
@@ -77,20 +189,22 @@ export class ApiService {
       }
       if(!live||merged.values.length!==live.data.values.length)entries.push({kind:'globals',id:'default',data:merged,expectedRevision:live?.revision||0});
     }
+    if(data.settings&&!this.store.row('settings','default')){const settings=await sanitizedPortableData(portableSettings(data.settings));validateOptions({...DEFAULT_SETTINGS,...settings});entries.push({kind:'settings',id:'default',data:settings,expectedRevision:0});}
     const documents=await this.store.putMany(entries);
     return {documents,warnings:[...new Set(warnings)],...workspacePreview(data)};
   }
   async export({kind,id,format='postman',itemId}) {
     assertKind(kind);
-    const data=await this.store.export(kind,id);
+    const data=await sanitizedPortableData(await this.store.export(kind,id));
     if(format==='curl') {
       const found=findItem(data,itemId),item=found?.item; if(!item?.request) throw new Error('NOT_FOUND');
+      if(item.request?.['x-codex-api-client']?.protocol)throw Error('PROTOCOL_EXPORT_UNSUPPORTED: cURL 无法表示协议会话');
       const inherited=[data,...found.parents].map(p=>p.auth).filter(Boolean).at(-1);
       return {text:exportCurl(item,inherited),name:item.name+'.sh',warnings:['cURL 不包含脚本、环境变量解析和工作区 Cookie；敏感变量值已排除。']};
     }
     const warnings=[];
     const scan=root=>{for(const item of root.item||[])if(item.item){if(item.variable?.length)warnings.push('文件夹变量为本插件扩展，原生 Postman 中需改写为文件夹前置脚本。');scan(item);}};
-    if(kind==='collection')scan(data);
+    if(kind==='collection'){scan(data);const protocols=root=>{if(root.request?.['x-codex-api-client']?.protocol)warnings.push('协议配置仅作为 API Client 扩展保存，Postman HTTP Runner 无法执行；导入不会自动连接。');for(const child of root.item||[])protocols(child);};protocols(data);}
     return {data,name:(data.info?.name||data.name||kind)+'.json',warnings:[...new Set(warnings)]};
   }
   async editItem({collectionId,itemId,operation,parentId,position=0,item,revision}) {
@@ -114,8 +228,12 @@ export class ApiService {
     name=basename(name);const path=join(directory,randomUUID()+'-'+name.replace(/[^\p{L}\p{N}._-]/gu,'_'));
     await writeFile(path,bytes,{mode:0o600});return {path,name,size:bytes.length};
   }
-  async start({collectionId,itemId,environmentId,data=[],dataText,dataFormat='json',options={}}) {
-    const settings=(await this.store.get('settings','default'))?.data||{};
+  async graphqlIntrospect({collectionId,itemId,environmentId}) {
+    return this.start({collectionId,itemId,environmentId},true);
+  }
+  async start({collectionId,itemId,environmentId,data=[],dataText,dataFormat='json',options={}},introspect=false) {
+    const settingsDoc=await this.store.get('settings','default',{reveal:true});
+    const settings=settingsDoc?.data||{};
     options={...DEFAULT_SETTINGS,...settings,...options};validateOptions(options);
     if(this.active.size>=4)throw new Error('RUN_LIMIT: 同时最多运行 4 个集合');
     const collectionDoc=await this.store.get('collection',collectionId,{reveal:true});if(!collectionDoc)throw new Error('NOT_FOUND');
@@ -124,6 +242,13 @@ export class ApiService {
     const globalsDoc=await this.store.get('globals','default',{reveal:true});
     const cookiesDoc=await this.store.get('cookies','default',{reveal:true});
     const collection=selectCollection(collectionDoc.data,itemId), warnings=warningsFor(collection);
+    const validateNetwork=root=>{if(root.request?.['x-codex-api-client']?.protocol)throw Error('PROTOCOL_RUN_UNSUPPORTED: 协议请求请使用交互客户端，不支持 HTTP Runner 或 pm.* 脚本');if(root.request)validateOptions({...options,...networkOf(root)});for(const child of root.item||[])validateNetwork(child);};validateNetwork(collection);
+    options.singleRequest=!!(itemId&&findItem(collectionDoc.data,itemId)?.item.request);
+    if(introspect){
+      const item=findItem(collection,itemId)?.item;
+      if(!item?.request||item.request.body?.mode!=='graphql')throw new Error('GRAPHQL: 请先选择并保存 GraphQL 请求');
+      item.request={...item.request,method:'POST',body:{mode:'graphql',graphql:{query:INTROSPECTION_QUERY,variables:'{}',operationName:'IntrospectionQuery'}}};
+    }
     if(warnings.length)throw new Error('UNSUPPORTED: '+warnings.join('；'));
     if(dataText!==undefined)data=parseData(dataText,dataFormat);
     if(!Array.isArray(data)||data.some(row=>!row||typeof row!=='object'||Array.isArray(row)))throw new Error('DATA: 需要对象数组');
@@ -131,13 +256,17 @@ export class ApiService {
     const uploads=join(this.store.directory,'uploads');
     const owned=(await readdir(uploads).catch(()=>[])).map(p=>join(uploads,p));
     options.allowedFiles=[...owned,...(options.allowedFiles||[])].map(p=>resolve(p));
+    const workspace=await Promise.all((await this.store.list('collection')).map(d=>this.store.get('collection',d.id,{reveal:true})));
     const secretValues=[];
-    for(const d of [collectionDoc,environmentDoc,globalsDoc,cookiesDoc])if(d)await transformSecrets(d.data,v=>{secretValues.push(v.value);return v;});
+    for(const d of [...workspace,collectionDoc,environmentDoc,globalsDoc,cookiesDoc,settingsDoc])if(d)await transformSecrets(d.data,v=>{secretValues.push(v.value);return v;});
     // Scripts receive the actual values, without implementation-specific Keychain references.
     const secretKeys={environment:[],globals:[],collectionVariables:[]};
+    const collectionSecretKeys=Object.fromEntries(workspace.map(d=>[d.id,(d.data.variable||[]).filter(isSecret).map(v=>v.key)]));
     for(const [doc,scope]of [[environmentDoc,'environment'],[globalsDoc,'globals'],[collectionDoc,'collectionVariables']])if(doc)await transformSecrets(doc.data,v=>{secretKeys[scope].push(v.key);return v;});
     const resolved=async d=>transformSecrets(d||{},v=>{delete v.secretRef;v.type='string';delete v.sensitive;return v;});
-    const input={collection:await resolved(collection),environment:await resolved(environmentDoc?.data),globals:await resolved(globalsDoc?.data),cookies:await resolved(cookiesDoc?.data),data,options,secretKeys};
+    // Runtime-only identity uses document IDs: restored copies may share Postman collection IDs.
+    collection.info._postman_id=collectionId;
+    const input={workspace:await Promise.all(workspace.map(d=>resolved({...d.data,info:{...d.data.info,_postman_id:d.id}}))),collection:await resolved(collection),environment:await resolved(environmentDoc?.data),globals:await resolved(globalsDoc?.data),cookies:await resolved(cookiesDoc?.data),data,options:materializeNetwork(options),secretKeys,collectionSecretKeys};
     const run={id:randomUUID(),status:'running',name:collection.info.name,collectionId,itemId,environmentId,createdAt:new Date().toISOString(),responses:[],assertions:[],logs:[],errors:[],variableChanges:[]};
     const controller=new AbortController();this.store.saveRun(run);
     const cancellationPoll=setInterval(()=>{if(this.store.isCancelled(run.id))controller.abort();},200);
@@ -150,6 +279,8 @@ export class ApiService {
       // Persist only progress until all script variable changes have been collected.
       this.store.saveRun({...run,responses:[],assertions:[],logs:[],errors:[],progress:{completedRequests:run.responses.length}});
     }}).then(async result=>{
+      // Final worker output owns execution errors; retain only newly produced persistence errors below.
+      run.errors=[];
       const additional=[];
       try {
         await this.persistScope('environment',environmentId,environmentDoc,result.environment?.values,run,additional);
@@ -207,7 +338,7 @@ export class ApiService {
     if(own){own.controller.abort();await own.completion;}
     return this.result({runId});
   }
-  async close() { for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
+  async close() { this.closed=true; await Promise.allSettled([...this.pendingStarts]); await this.protocols.close(); await this.oauth.close(); this.backups.close(); for(const {controller}of this.active.values())controller.abort();await Promise.allSettled([...this.active.values()].map(a=>a.completion)); }
 }
 function sanitize(value,secrets) {
   const encoded=[];
@@ -217,7 +348,7 @@ function sanitize(value,secrets) {
     const copy=Object.fromEntries(Object.entries(v).map(([k,x])=>[k,credentials(x)]));
     if(/^(authorization|proxy-authorization|cookie|set-cookie)$/i.test(String(v.key||''))&&typeof v.value==='string') {
       encoded.push(v.value);
-      if(/^Basic /i.test(v.value))encoded.push(v.value.slice(6));
+      if(/^(Basic|Bearer) /i.test(v.value))encoded.push(v.value.slice(v.value.indexOf(' ')+1));
       copy.value='••••••••';
     }
     for(const k of Object.keys(copy))if(/^(authorization|proxy-authorization|cookie|set-cookie)$/i.test(k)&&typeof v[k]==='string'){encoded.push(v[k]);copy[k]='••••••••';}
@@ -232,12 +363,14 @@ function sanitize(value,secrets) {
   if(clean.responses)clean.responses.forEach(fix);else fix(clean);
   return clean;
 }
-export function validateOptions(options) {
-  for(const [key,min,max]of [['requestTimeout',1,300000],['scriptTimeout',1,60000],['runTimeout',100,600000],['iterations',1,1000],['delay',0,60000],['maxResponseSize',1,20*1024*1024]]) {
-    if(options[key]!==undefined&&(!Number.isInteger(options[key])||options[key]<min||options[key]>max))throw new Error(`LIMIT: ${key} 必须是 ${min}–${max} 的整数`);
-  }
-  if(options.proxy){
-    if(!/^http:\/\//.test(options.proxy))throw new Error('PROXY: 首版仅支持 HTTP 代理 URL');
-    const proxy=new URL(options.proxy);if(proxy.username||proxy.password)throw new Error('PROXY: 首版不支持带凭据的代理 URL');
-  }
+export {validateOptions} from './auth.mjs';
+
+function collectionPreview(data){const requests=root=>(root.item||[]).flatMap(i=>i.item?requests(i):[i.request]);const all=requests(data);const auths=root=>[root.auth?.type,root.request?.auth?.type,...(root.item||[]).flatMap(auths)].filter(Boolean);return {requestCount:all.length,collections:[{name:data.info.name,requestCount:all.length}],servers:[...new Set(all.map(r=>(typeof r?.url==='string'?r.url:r?.url?.raw||'').replace(/\{\{([^}]+)\}\}/g,(match,key)=>data.variable?.find(v=>v.key===key&&!v.disabled)?.value??match)))].slice(0,20),auth:[...new Set(auths(data))]};}
+
+const INTROSPECTION_QUERY=`query IntrospectionQuery {
+ __schema { queryType { name } mutationType { name } subscriptionType { name }
+ types { kind name description fields(includeDeprecated: true) { name description args { name description type { ...TypeRef } } type { ...TypeRef } } inputFields { name type { ...TypeRef } } enumValues { name } }
+ }
 }
+fragment TypeRef on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } } } }
+`;

@@ -1,3 +1,4 @@
+import {markCredentials} from './auth.mjs';
 import {normalizeCollection,flattenRequests} from './collections.mjs';
 import {transformSecrets} from './secrets.mjs';
 export const WORKSPACE_FORMAT='codex-api-client-workspace';
@@ -29,3 +30,36 @@ export function workspacePreview(data){
 }
 export const portableData=data=>transformSecrets(data,v=>{delete v.secretRef;return {...v,value:''};});
 export function uniqueName(name,names){let candidate=name,index=1;while(names.has(candidate))candidate=name+'（导入'+(index++===1?'':index-1)+'）';names.add(candidate);return candidate;}
+// Postman authorizers store credential entries under schema-specific parameter names.
+// In particular apikey.key is the public header/query name; apikey.value is the credential.
+const authSecrets={
+ basic:['password'],bearer:['token'],digest:['password'],apikey:['value'],
+ oauth1:['consumerSecret','tokenSecret','token'],oauth2:['accessToken','refreshToken','clientSecret','password'],
+ awsv4:['secretKey','sessionToken'],hawk:['authKey'],ntlm:['password'],
+ edgegrid:['clientSecret','clientToken','accessToken'],jwt:['secret','privateKey'],asap:['privateKey'],
+};
+export async function sanitizedPortableData(data){
+ const clean=await portableData(markCredentials(data));
+ const visit=(value,parent='')=>{
+  if(Array.isArray(value))return value.map(v=>visit(v,parent));
+  if(!value||typeof value!=='object')return value;
+  const out={};
+  for(const [key,v]of Object.entries(value)){
+   if(key==='secretRef')continue;
+   if(key==='value'&&(/^(authorization|proxy-authorization|cookie|set-cookie|x-api-key)$/i.test(value.key||'')||authSecrets[parent]?.includes(value.key))){out[key]='';continue;}
+   if(typeof v==='string'&&/-----BEGIN (?:[A-Z]+ )?PRIVATE KEY-----/.test(v)){out[key]='';continue;}
+   if(['url','raw'].includes(key)&&typeof v==='string'&&/^(?:https?|wss?|mqtts?|grpcs?):\/\//i.test(v)){
+    try{const url=new URL(v);if(url.username||url.password){url.username='';url.password='';out[key]=url.toString();continue;}}catch{}
+   }
+   if(/^(password|clientSecret|privateKey|passphrase|accessToken|refreshToken)$/i.test(key)){out[key]='';continue;}
+   if(key==='proxy'&&typeof v==='string'){
+    try{const url=new URL(v);url.username='';url.password='';out[key]=url.toString();}catch{out[key]='';}continue;
+   }
+   out[key]=visit(v,key);
+  }
+  return out;
+ };
+ return visit(clean);
+}
+
+export const portableSettings=data=>Object.fromEntries(['requestTimeout','scriptTimeout','runTimeout','strictSSL','followRedirects','delay','maxResponseSize','proxy','noProxy','proxyCredentials','ui'].filter(k=>k in data).map(k=>[k,data[k]]));

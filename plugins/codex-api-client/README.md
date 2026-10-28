@@ -28,7 +28,7 @@ npm run install:api-client
 
 ## 支持范围
 
-支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key、cURL/Postman 导入导出、JSON/CSV 数据迭代和取消运行。当前不支持 OAuth 授权窗口、其他协议、Vault 或云脚本包。
+支持嵌套集合、参数、请求头、常见请求体、Cookie、Basic/Bearer/API Key 与高级鉴权、cURL/Postman、OpenAPI3/Swagger2 JSON/YAML、HAR 导入和 GraphQL、JSON/CSV 数据迭代和取消运行。OAuth2 支持系统浏览器授权码 + PKCE、客户端凭据和刷新；另有 SSE、WebSocket/Socket.IO、gRPC、MQTT、远程 MCP 交互客户端；不支持 Vault 或云脚本包。
 
 ## 快速操作
 
@@ -49,13 +49,13 @@ npm run install:api-client
 
 ## 变量与响应查看
 
-URL 中能在当前作用域解析的变量显示绿色，未设置的变量显示红色并带点状下划线。悬停或将输入光标移入变量，可查看值及来源；敏感值显示掩码，空字符串与未设置分别提示。取值遵循运行时作用域顺序：文件夹、选中环境、集合、全局；禁用变量不参与解析。脚本保存的变量变化会在运行后刷新。
+URL 中能在当前作用域解析的变量显示绿色，未设置的变量显示红色并带点状下划线。悬停或将输入光标移入变量，可查看值及来源；敏感值显示掩码，空字符串与未设置分别提示。严格模式遵循 local > data > environment > collection > global；扩展模式额外应用文件夹临时作用域；禁用变量不参与解析。脚本保存的变量变化会在运行后刷新。
 
 JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；响应正文独立滚动，格式化、搜索、复制和保存工具栏固定在响应区顶部。
 
 ## 本地数据与运行限制
 
-默认数据目录为 `~/Library/Application Support/Codex API Client`，可通过 `CODEX_API_CLIENT_DATA_DIR` 修改。敏感变量和 Cookie 值使用 macOS Keychain；新电脑需要重新配置敏感值。将密码、Token 标记为敏感并通过 `{{token}}` 引用，不要硬编码到脚本或 URL。普通响应可存入本地历史。
+默认数据目录为 `~/Library/Application Support/Codex API Client`，可通过 `CODEX_API_CLIENT_DATA_DIR` 修改。敏感变量和 Cookie 值使用 macOS Keychain；新电脑可用完整加密备份迁移敏感值，普通导出则需要重新配置。将密码、Token 标记为敏感并通过 `{{token}}` 引用，不要硬编码到脚本或 URL。普通响应可存入本地历史。
 
 每次保存检查 revision，遇到并发冲突保留未保存编辑。默认超时为请求 30 秒、脚本 5 秒、运行 120 秒；每个服务最多同时 4 次运行，不作为压测工具。
 
@@ -65,7 +65,7 @@ JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；
 
 ## 常见问题
 
-**新电脑如何继续使用原有请求？** 在旧电脑点击「导出全部」，在新电脑安装插件后导入备份。敏感值、Cookie 和本机文件附件不随备份迁移，需要重新配置；详细范围见[整体导入与导出](#整体导入与导出)。
+**新电脑如何继续使用原有请求？** 在旧电脑点击「导出全部」，在新电脑安装插件后导入备份。普通导出不迁移敏感值、Cookie 和附件；需要全部迁移时使用「完整备份与恢复」，密码加密归档包含这些内容；详细范围见[密码加密完整备份](#密码加密完整备份)。
 
 **界面更新了，安装后仍是旧版？** 先确认安装脚本完成构建，再重新打开 Codex 并新建聊天。开发预览也需先运行 `npm run build`。
 
@@ -78,3 +78,73 @@ JSON 响应支持格式化缩进及类型配色，搜索与原始模式保留；
 在插件目录执行 `npm ci`、`npm run build`、`npm test`、`npm run check`。`npm run dev` 在 `127.0.0.1:47890` 提供独立预览。浏览器验证使用 `npm exec playwright -- test --config playwright.tree.config.ts`，需要 Chrome。
 
 完整界面与易用性回归使用 `npm exec playwright -- test --config playwright.usability.config.ts`；先执行 `npm run build`，确保预览加载最新界面。
+
+开发参考：[MCP 操作约定](skills/api-client/SKILL.md)、[本地功能设计记录](../../docs/superpowers/specs/2026-10-28-api-client-local-design.md)、[实施计划记录](../../docs/superpowers/plans/2026-10-28-api-client-local.md)。设计与计划保留开发阶段的约束，当前使用范围以本文为准。
+
+## 兼容模式与规范导入
+
+标准新建集合和普通 Postman/OpenAPI/HAR/cURL 导入默认严格模式：local > data > environment > collection > global；文件夹变量不进入运行作用域。既有未标记且包含文件夹变量的本地集合和 v1 工作区备份保留扩展行为；文件夹变量通过临时作用域覆盖运行数据。可在集合概览切换模式，配置保存在 `x-codex-api-client.compatibilityMode`（`strict` / `extended`），其余扩展字段、请求 ID、认证和未编辑的 body 元信息保留。单条请求发送忽略 `setNextRequest`，集合 Runner 保留跳转语义。
+
+`api_import_preview` 和 `api_import` 的原 `text` 参数继续有效，新增可选 `localFiles: {相对文件名: 文件文本}`。支持 OpenAPI 3.0/3.1、Swagger 2.0 的 JSON/YAML，经官方 `openapi-to-postmanv2@6.4.2` 转为请求模板；HAR 导入 URL、重复 Header、Cookie、原始文本或表单请求体。预览显示请求数量、地址、认证类型和未支持项。HAR 响应/时序不导入，缺少文件内容的 HAR 上传拒绝；OpenAPI 回调、Webhook、链接与响应校验不自动执行，示例/变量及认证需检查。
+
+规范导入只处理所选主文件和明确提供的依赖。UI 支持多个依赖文件或选择依赖目录；目录相对路径以所选目录为根。远程 `$ref`、绝对路径、越界引用、不存在的本地引用、外部文件循环引用均拒绝；不会自动读取文件系统或访问网络。依赖总计不超过 20 MB、100 个文件，展开限制 100000 节点及 100 层。递归的主文件内部 schema 引用由官方转换器处理。
+
+cURL 额外支持 `-G/--get`、`--data-urlencode`、`-A/--user-agent`、`-e/--referer` 以及常见短参数紧接值。保留无 shell 执行原则；文件 URL 编码、代理、重试、`--insecure`、`--location`、`--compressed` 等不能保真选项明确拒绝，避免静默改变传输行为。
+
+## GraphQL
+
+在请求体类型选择 GraphQL，编辑 query、JSON variables 和 operationName。保存/导入/导出仍使用 Postman `body.mode=graphql`；发送、脚本、断言、环境、继承认证、Cookie 和网络设置沿用 HTTP Runner。GraphQL cURL 导出为 JSON 请求体，变量 JSON 无效时拒绝导出。
+
+点击「发送 Schema introspection」后才实际访问目标，打开页面不会发送。该操作先保存草稿，再通过 `api_graphql_introspect({collectionId,itemId,environmentId?})` 使用既有 HTTP 运行链返回 runId；使用 `api_run_result` 轮询并可通过 `api_run_cancel` 取消。保存请求的 body 不改变，但原有脚本照常执行，可能写入环境等作用域。成功后选择 schema 类型，在查询中输入字段前缀或 Ctrl+Space 使用实际字段补全；服务端禁用 introspection、GraphQL 错误或 HTTP 错误会明确提示。
+
+
+## 高级鉴权与请求网络
+
+认证表单使用已安装 `postman-runtime` 的字段：Digest、OAuth1、OAuth2 Bearer、AWS Signature v4、Hawk、NTLM、EdgeGrid、JWT、ASAP。界面显示必需字段，缺失或非法配置会阻止请求；签名仍由运行时完成。密码、Token、私钥、结构明确的 Authorization/Cookie 请求头、代理凭据和证书口令在保存、导入及完整恢复时自动进入 Keychain。复制集合/环境使用 `api_document_duplicate` 在后端重新保护凭据，返回值仍隐藏。
+
+OAuth2 的“开始 OAuth 授权”是唯一打开系统浏览器的操作。授权码使用 S256 PKCE、随机 state 和 `http://127.0.0.1:<临时端口>/oauth/callback`；提供方需要允许回环动态端口。授权期限为 3 分钟，取消、过期、完成或服务关闭会关闭监听器。Token 端点只接受 HTTPS（回环本地模拟服务允许 HTTP），不跟随跳转，客户端凭据通过表单提交。Token 保存到指定环境变量，刷新配置保存为同环境下 `<变量名>.__oauth` 敏感变量；不返回 Token、code 或提供方错误正文。刷新仅更新指定变量，不修改其他环境。普通导出排除这些值，完整加密备份可迁移它们。
+
+`api_oauth_start({flow,authorizationUrl?,tokenUrl,clientId,clientSecret?,scope?,target:{kind,id,key}})`、`api_oauth_poll({sessionId})`、`api_oauth_cancel({sessionId})`、`api_oauth_refresh({target})` 均仅对 App 可见。`target.kind` 为 `environment` 或 `globals`（UI 选择环境）；结果只含会话状态、目标和过期时间等脱敏元信息。客户端凭据与刷新操作立即返回 pending 会话 ID，界面通过 poll 获取完成状态，交换期间可取消；离开认证面板也会取消。最多 4 个活动 OAuth 会话，完成结果保留 5 分钟，最多 100 条。
+
+请求“网络”面板可覆盖超时、TLS 校验、重定向、代理和上传 CA/客户端证书；省略字段继承全局，保存在请求 item 的 `x-codex-api-client.network`。`proxy:null` 表示直接连接，不回退系统环境变量代理。全局设置支持 `proxyCredentials:[{key:"username",value,type:"secret"},{key:"password",value,type:"secret"}]` 及 `noProxy` 原生 URL 匹配规则（如 `http+https://localhost:*/*`）。凭据和绕过规则由 Postman SDK 处理。请求 CA/证书路径纳入加密备份附件清单并在恢复时重映射，文件访问仍受显式许可/上传附件限制。HTTP 集合逐项重置网络设置，后续请求不继承前一请求的覆盖。
+
+### SSE / WebSocket / Socket.IO 交互调试
+
+在请求地址栏选择协议，保存后点击「连接协议」。协议配置保存在 `request['x-codex-api-client'].protocol`，格式为 `{version:1,type:'sse'|'websocket'|'socketio',connectTimeout?,operationTimeout?,reconnectAttempts?,reconnectDelay?,path?,auth?,subprotocols?}`。URL、请求头和常用认证沿用请求本身，环境仅在连接时在后端解析；Socket.IO 握手 `auth` 的各值使用 `{key,type:'secret',value}` 保存，自动进入 Keychain，普通导出排除值。`path/auth` 仅用于 Socket.IO，`subprotocols` 仅用于 WebSocket。导入、打开请求或服务重启不会连接。
+
+SSE 实时显示多行 data、event、id、retry；WebSocket 可发送文本或 Base64 二进制；Socket.IO 支持事件名、JSON 参数数组、二进制及可选 ACK。默认连接超时 30 秒（继承请求 requestTimeout），操作超时 5 秒，自动重连 0 次。SSE/Socket.IO 可显式设置最多 3 次重连，间隔默认 1000ms、最大 60 秒；SSE 采用服务端 retry（同样封顶 60 秒），重连携带 Last-Event-ID。WebSocket 通过再次点击连接显式重连。
+
+每服务最多 4 个活动会话及 4 个保留会话；新建时淘汰最旧终态会话。每会话最多 1000 条/10 MiB，单条序列化事件最多 1 MiB，超限单条改为固定错误事件；界面只显示最近 200 条。`api_protocol_connect({collectionId,itemId,environmentId?})` 返回 `{sessionId,state}`；`api_protocol_action({sessionId,action,payload})`：WebSocket `send` 使用 `{text}` 或 `{encoding:'base64',base64}`，Socket.IO `emit` 使用 `{event,args?,binary?,ack?}`；`api_protocol_events({sessionId,after?,limit?})`（limit 1–1000）返回 `{state,events,cursor,firstSeq,gap}`，事件为 `{seq,time,type,data}`。二进制在脱敏后表示为 `{encoding:'base64',base64,size}`。`gap` 表示旧游标前的数据已被淘汰。`api_protocol_disconnect({sessionId})` 显式关闭。会话仅属于创建它的服务；标签切换保留连接，关闭所属标签（包含非活动标签）和服务退出会断开。
+
+协议不执行 HTTP Runner、pm.* 脚本或逐消息断言；HTTP Send/Runner 拒绝混入协议请求，cURL 导出拒绝协议请求，Postman 导出明确警告其协议扩展无法作为原生 HTTP 执行。支持请求头、Basic/Bearer/OAuth2 header/header API key；其他认证明确拒绝。网络继承 item 扩展 `network` 与全局设置；ws/Socket.IO 支持 strictSSL，SSE 必须验证 TLS。代理、代理认证、自定义 CA、客户端证书和 noProxy 暂不支持，配置存在时连接会明确失败；ws/Socket.IO 的 followRedirects=false 覆盖也会明确失败。协议错误使用固定信息，密钥及其 Base64/hex/URL 编码和二进制回显会在缓冲前脱敏。自定义业务请求头中未标记的秘密和消息正文不能自动分类，请用敏感变量引用。
+
+### 原生协议调试（本地后端）
+
+保存请求的 `request['x-codex-api-client'].protocol` 使用 `version:1` 和 `type:'grpc'|'mqtt'|'mcp'`；URL 分别使用 `grpc[s]://host:port`、`mqtt[s]://host:port`、`http[s]://...`。连接、事件分页与断开沿用 `api_protocol_*` 工具；导入/恢复只保存配置，不连接、不重订阅。界面提供方法/主题/工具/资源/提示选择、JSON 参数、schema 与脱敏结果；无跨协议 Runner 或 pm.*。
+
+- gRPC：`protoFiles:[{name:'main.proto',path:'上传返回路径'}]`、`protoEntry:'main.proto'`，依赖名称必须在显式文件集中（可用 `common/types.proto`），或显式 `reflection:true`；两种来源互斥。文件逐个最多1MiB，共100个/10MiB，无任意磁盘/远程 import。`metadata:[{key,value,disabled?}]` 值全部作为敏感数据。连接后 `methods` 事件带 RPC path、请求/响应流标志和 descriptor schema。操作 `call {method:'/package.Service/Method',message:{...}}`，写入流 `write {message:{...}}`，半关闭 `end {}`，取消当前 RPC `cancel {}`。每会话一个活动 RPC；操作超时是整个 RPC 的 deadline，默认5秒。
+- MQTT：`username`/`password`（自动保护）、可选 `clientId`，使用独立认证字段；HTTP 请求头/认证不适用，会明确拒绝。操作 `subscribe/unsubscribe {topic,qos?}`，`publish {topic,text,qos:0|1|2,retain?:boolean}` 或 `{topic,encoding:'base64',base64,...}`。接收事件包含 topic、二进制 payload、QoS、retain、dup。clean session，无自动重订阅；`reconnectAttempts` 默认0、最多3，`reconnectDelay` 默认1000ms、最多60000ms。禁用离线QoS0队列，最多16个待确认操作，超时关闭会话；不继承环境 SOCKS 路由。
+- gRPC/MQTT TLS：`protocol.tls:{caFile?,certFile?,keyFile?,passphrase?}` 指向上传文件或显式 allowedFiles；证书/key成对，使用安全URL。gRPC必须验证TLS，且不支持加密PEM key/passphrase；MQTT支持key passphrase。专用 TLS 文件加入加密附件备份；普通导出不含密钥值。HTTP proxy/CA/certificates/noProxy 不静默复用，会明确拒绝。
+- MCP：仅远程 SDK v1 Streamable HTTP（`transport:'http'`，默认）和旧 SSE（`transport:'sse'`），系统TLS、同源端点、禁止重定向和stdio。操作 `listTools/listResources/listPrompts {cursor?}`、`callTool {name,arguments?}`、`readResource {uri}`、`getPrompt {name,arguments?}`、`cancel {}`；目录/结果按操作名写入事件。最多8个待处理调用，单次默认5秒，可用 `operationTimeout` 调整；取消通知和连接关闭由SDK处理。
+
+会话沿用4连接、1000条/10MiB事件、1MiB单条上限；`connectTimeout`/`operationTimeout` 为1–300000ms。原生协议文件引用仅按 `protoFiles[].path` 与 `tls.caFile/certFile/keyFile` 迁移，不重写相同的业务字符串。反射客户端1.4.1与grpc-js1.14.6固定版本；反射close仍有带检查的兼容代码，升级须重跑反射/取消/TLS用例。gRPC 使用固定Node专用子进程，断开/超时强制终止并等待退出，包含尚未完成TCP建连的socket；清理完成前继续占用最多4会话的配额。IPC保留二进制，最多16个待处理操作、1024条/4MiB待发送事件，单条1MiB；队列溢出明确失败并清理。界面独立保留当前方法和3类MCP目录（每类最多1000项），不随最近200条事件滚动淘汰，重新连接时清空。
+
+## 响应预览、Cookie 与工作区子请求
+
+响应按 Content-Type 显示 JSON/XML/文本、常见栅格图片、HTML 和 PDF。原始正文、搜索和字节下载保留；下载来自运行结果的脱敏字节，不能用于逐字节还原含敏感值的原始传输。HTML 和 `pm.visualizer.set` 的已渲染模板在独立 opaque-origin iframe 内显示，sandbox 不启用脚本或同源权限，内置 CSP 禁止外部网络。静态元素白名单去除脚本、导航、meta refresh、链接、表单、嵌套 frame 和 SVG；保留基础排版/表格/内联样式及 data 栅格图片。超过1MiB的 HTML 请查看原始内容或下载。Visualizer 的 JavaScript、外部图表库和交互脚本不运行。SVG 仅下载，PDF 提供下载后的本地打开入口，宿主可能阻止内嵌显示。
+
+设置中的 Cookie 管理支持域筛选、新增/删除、清空所选域及名称、值、Path、过期时间、Secure、HttpOnly、SameSite、hostOnly 编辑。选择域后才通过 App-only `api_cookies_get` 显示该域值；`api_cookies_edit` 使用 revision 替换该域，其他域不变。普通工作区、模型工具结果及运行报告继续隐藏 Cookie 值。
+
+`pm.execution.runRequest(id, {variables})` 使用已安装 Postman 原生嵌套执行器在当前工作区查找请求，保留祖先认证/脚本、原生变量继承、结果和错误。优先当前集合的内部 ID；外部集合存在多个相同 ID 时明确拒绝，避免恢复副本使用错误凭据。最大深度4、同一运行最多20次调用，并受整次运行期限（默认120秒）、脚本期限和取消控制。脚本最终集合变量按原生有效根作用域进行冲突检查并持久化，嵌套变更由运行时传播，不分别覆盖每个被调用集合。嵌套请求各自应用网络/认证设置，不能通过它启动非HTTP协议。每个 HTTP Run 使用固定子进程，取消和完成等待该进程退出。 标记敏感的集合变量（含嵌套集合）、环境和全局变量会记录脚本内中间赋值用于最终脱敏。若取消、超时或进程退出导致脚本未完成变量捕获，本次响应、断言、日志及原始错误会全部隐藏，并显示固定说明；已完成捕获的普通日志正常保留。中间赋值跟踪增加脚本内存使用，仍受子进程256MiB、脚本/整次运行期限和50MiB结果上限约束。
+
+## 密码加密完整备份
+
+「完整备份与恢复」与普通「导出全部」并存。完整归档包含集合及协议配置、环境/全局变量、已存凭据、Cookie、网络/UI设置、显式引用的上传附件/CA/证书私钥；历史默认不包含，可明确选择。使用 scrypt 与 AES-256-GCM，密码只通过 App-only `api_backup_*` 工具提交；1MiB分块传输、会话15分钟过期、最多8个传输。错误密码、篡改、无效文档结构和不合法附件整体拒绝。归档并非可公开分享文件，应由用户安全保管密码和文件。
+
+导入先解密并验证各类文档与历史结构、单例 ID 和重复身份，再预览并确认写入；不规范化或重排有效请求 ID，未知 Postman 字段保留。集合验证最多100层/100000节点。默认作为新增副本合并，保留内部请求 ID；globals、Cookie、设置冲突默认保留本机值，可逐项选用备份。替换工作区先生成可下载的加密恢复快照。恢复重建环境映射、目标Keychain引用及私有附件路径，仅按已知文件字段重写，不复制源机任意 allowedFiles。失败回滚新增文件、凭据和数据库变更。活动HTTP运行、协议资源或OAuth授权存在时恢复会拒绝；恢复期间不能新启动它们。恢复和服务重启不自动运行脚本、连接协议或重订阅。
+
+主题、侧栏开关、响应页签和所选环境从工作区设置加载，修改通过版本检查保存；旧 localStorage 仅在没有对应设置时迁移，显式空环境保留。
+
+MQTT 在 TCP/TLS 解码后、MQTTJS 解析前增量检查 Remaining Length，声明载荷超过1MiB即失败并关闭，不等待完整包。
+
+MCP 的HTTP JSON和旧SSE读取在SDK解析前限制解码后的单次HTTP响应最多10MiB；SSE此限制是一次连接的累计流量，达到上限会明确失败，需显式重新连接，与UI滚动事件窗口的10MiB上限不同。Handlebars使用兼容补丁4.7.10，Zod锁定解析依赖更新至4.6.7；依赖审计仍有16项（8 moderate、8 high），不宣称无漏洞。

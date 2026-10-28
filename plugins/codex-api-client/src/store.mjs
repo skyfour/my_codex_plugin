@@ -1,3 +1,4 @@
+import {markCredentials} from './auth.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,12 +33,21 @@ export class Store {
   async put(kind,id,data,expectedRevision) {
     return (await this.putMany([{kind,id,data,expectedRevision}]))[0];
   }
-  async putMany(documents) {
+  workspaceIdentity() {
+    return JSON.stringify({
+      documents:this.db.prepare('SELECT * FROM documents ORDER BY kind,id').all(),
+      runs:this.db.prepare('SELECT * FROM runs ORDER BY id').all(),
+    });
+  }
+  async putMany(documents,{replace=false,history=[],expectedWorkspaceIdentity,beforeCommit}={}) {
+    const identity=replace?(expectedWorkspaceIdentity??this.workspaceIdentity()):undefined;
     const created=[],pending=[],prepared=[],keys=new Set();
     try {
+      if(replace&&this.workspaceIdentity()!==identity)throw new Error('CONFLICT: 工作区已更新，请重新预览恢复');
       for(let {kind,id,data,expectedRevision} of documents){
         const key=JSON.stringify([kind,id]);if(keys.has(key))throw new Error('INVALID_DOCUMENT: 重复文档');keys.add(key);
         if(kind==='cookies')data={...data,cookies:(data.cookies||[]).map(c=>({...c,type:'secret'}))};
+        data=markCredentials(data);
         const original=this.row(kind,id);
         if((original?.revision??0)!==expectedRevision)throw new Error('CONFLICT: 内容已在其他会话更新，请重新加载后保存');
         const owned=new Set();
@@ -53,10 +63,17 @@ export class Store {
         prepared.push({kind,id,data:JSON.stringify(stored),expectedRevision});
       }
       // Prepare Keychain values first; the SQLite transaction contains only synchronous writes.
+      beforeCommit?.();
       this.db.exec('BEGIN IMMEDIATE');
       try {
+        if(replace){
+          // Validate the complete pre-snapshot workspace while holding the write lock, before deleting anything.
+          if(this.workspaceIdentity()!==identity)throw new Error('CONFLICT: 工作区已更新，请重新预览恢复');
+          this.db.exec('DELETE FROM documents; DELETE FROM runs');
+        }
+        for(const run of history)this.saveRun(run);
         for(const {kind,id,data,expectedRevision} of prepared){
-          if((this.row(kind,id)?.revision??0)!==expectedRevision)throw new Error('CONFLICT: 内容已更新');
+          if(!replace&&(this.row(kind,id)?.revision??0)!==expectedRevision)throw new Error('CONFLICT: 内容已更新');
           this.db.prepare(`INSERT INTO documents VALUES(?,?,?,?,?) ON CONFLICT(kind,id)
             DO UPDATE SET revision=excluded.revision,data=excluded.data,updatedAt=excluded.updatedAt`)
             .run(kind,id,expectedRevision+1,data,new Date().toISOString());

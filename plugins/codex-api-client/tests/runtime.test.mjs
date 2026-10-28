@@ -90,3 +90,15 @@ test('nested folder variables inherit, override and do not leak into sibling req
   assert.equal(result.status,'completed',JSON.stringify(result.errors));assert.equal(result.assertions.length,3);assert.equal(result.assertions.some(a=>a.error),false,JSON.stringify(result.assertions));
   assert.equal(result.collectionVariables.find(v=>v.key==='scope').value,'collection');
 });
+
+test('strict compatibility keeps data precedence and GraphQL query variables operationName on wire',async t=>{
+ const {url}=await fixture(t);
+ const collection={info:{name:'Strict'},'x-codex-api-client':{compatibilityMode:'strict'},variable:[{key:'scope',value:'collection'}],item:[{id:'folder',variable:[{key:'scope',value:'folder'}],item:[{id:'graphql',name:'GraphQL',request:{method:'POST',url:url+'/graphql?scope={{scope}}',body:{mode:'graphql',graphql:{query:'query Hello($name: String) { hello(name: $name) }',variables:'{"name":"{{scope}}"}',operationName:'Hello'}}}}]}]};
+ const r=await executeCollection({collection,environment:{values:[{key:'scope',value:'environment'}]},data:[{scope:'data'}]});
+ assert.equal(r.status,'completed',JSON.stringify(r.errors));const echoed=JSON.parse(r.responses[0].body);assert.equal(echoed.url,'/graphql?scope=data');assert.deepEqual(JSON.parse(echoed.body),{query:'query Hello($name: String) { hello(name: $name) }',variables:{name:'data'},operationName:'Hello'});
+});
+test('isolated Send ignores self jumps and cannot visit sibling requests',async t=>{
+ const {url,hits}=await fixture(t);
+ const collection={info:{name:'Send'},item:[item('first',url+'/first',{event:[script('test','pm.execution.setNextRequest("first");')]})]};
+ const result=await executeCollection({collection,options:{singleRequest:true,runTimeout:1800}});assert.equal(result.status,'completed');assert.deepEqual(hits,['/first']);
+});
