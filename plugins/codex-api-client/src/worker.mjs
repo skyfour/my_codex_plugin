@@ -215,7 +215,8 @@ function run({ collection, environment = {}, globals = {}, cookies, data = [], o
         reportError(error);
         send('done',{
           status:hasErrors?'failed':'completed',environment:env.toJSON(),globals:globalScope.toJSON(),
-          collectionVariables:c.variables.toJSON().map(v=>sensitiveCollectionKeys.has(v.key)?{...v,type:'secret'}:v), cookies:jar.serializeSync(),
+          // Nested mutations already propagate into this root scope in native runtime.
+          collectionVariables:active.state.collectionVariables.toJSON().values.map(v=>sensitiveCollectionKeys.has(v.key)?{...v,type:'secret'}:v), cookies:jar.serializeSync(),
         });
       },
     });

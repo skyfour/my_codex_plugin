@@ -20,3 +20,12 @@ test('OpenAPI YAML preview gives requests, server, warning and blocks remote ref
  await page.getByLabel('导入内容').fill(text+'components:\n  schemas:\n    Pet: {$ref: "https://example.test/private"}\n');await expect(page.getByRole('status')).toContainText('REF');
  await page.getByLabel('导入内容').fill(text);await expect(page.getByLabel('导入预览')).toContainText('1 个请求');await page.getByRole('button',{name:'确认导入',exact:true}).click();await expect(page.getByText('已导入',{exact:true})).toBeVisible();const state=await api(page,'api_workspace_state');expect(state.collections.some((c:any)=>c.data.info.name==='UI OpenAPI')).toBeTruthy();
 });
+test('URL tooltip follows strict and extended folder precedence',async({page})=>{
+ await page.goto('http://127.0.0.1:47891');const name='tooltip-'+test.info().testId;
+ const env=await api(page,'api_document_put',{kind:'environment',revision:0,data:{name,values:[{key:'host',value:'environment.test'}]}});
+ const doc=await api(page,'api_document_put',{kind:'collection',revision:0,data:{info:{name},'x-codex-api-client':{compatibilityMode:'strict'},item:[{id:'folder',name:'folder',variable:[{key:'host',value:'folder.test'}],item:[{id:'request',name:'tooltip request',request:{url:'http://{{host}}'}}]}]}});
+ await page.getByLabel('刷新工作区').click();await page.getByRole('button',{name:'选择环境'}).click();await page.getByRole('option',{name:new RegExp(name)}).click();
+ const tree=page.locator('.collection').filter({has:page.locator('.collection-head').getByRole('button',{name,exact:true})});await tree.getByRole('button',{name:'tooltip request',exact:true}).click();
+ const url=page.getByLabel('URL',{exact:true});await url.focus();await url.evaluate((el:HTMLInputElement)=>{el.setSelectionRange(10,10);el.dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowLeft',bubbles:true}));});await expect(page.getByRole('tooltip')).toContainText('environment.test');await expect(page.getByRole('tooltip')).not.toContainText('folder.test');
+ doc.data['x-codex-api-client'].compatibilityMode='extended';await api(page,'api_document_put',{kind:doc.kind,id:doc.id,revision:doc.revision,data:doc.data});await page.getByLabel('刷新工作区').click();await url.focus();await url.evaluate((el:HTMLInputElement)=>{el.setSelectionRange(10,10);el.dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowLeft',bubbles:true}));});await expect(page.getByRole('tooltip')).toContainText('folder.test');
+});

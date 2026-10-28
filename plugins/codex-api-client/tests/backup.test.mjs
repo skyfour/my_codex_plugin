@@ -76,3 +76,22 @@ test('replacement rejects history accepted while the recovery snapshot is being 
  const source=new BackupService(a),target=new BackupService(b),preview=await target.preview(await source.export('p'),'p','replace');let release,entered;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r),get=b.secrets.get.bind(b.secrets);b.secrets.get=async k=>{entered();await gate;return get(k);};
  const restoring=target.restore(preview.transferId);await started;b.saveRun({id:'local-run',name:'accepted during snapshot'});release();await assert.rejects(restoring,/CONFLICT/);assert.equal(b.getRun('local-run').name,'accepted during snapshot');assert(b.row('environment','existing'));assert.equal(b.row('environment','incoming'),undefined);assert.equal(b.secrets.values.size,1);
 }));
+test('authenticated malformed documents and history reject before preview or restore side effects',()=>isolated(async(a,b)=>{
+ const target=new BackupService(b);await b.put('environment','existing',{name:'keep',values:[{key:'token',type:'secret',value:'keep-secret'}]},0);
+ const cases=[{kind:'environment',id:'e',data:{values:'bad'}},{kind:'globals',id:'default',data:{values:[null]}},{kind:'collection',id:'c',data:{info:{name:'bad'},item:[{id:'x',request:7}]}},{kind:'cookies',id:'default',data:{cookies:[{key:'x',value:'v',domain:8}]}},{kind:'settings',id:'default',data:{ui:{sidebarOpen:'false'}}},{kind:'globals',id:'wrong',data:{values:[]}}];
+ const {readdir}=await import('node:fs/promises');const snapshot=async()=>({rows:b.db.prepare('SELECT * FROM documents').all(),history:b.listRuns(),secrets:[...b.secrets.values],files:await readdir(target.directory)}),before=await snapshot();
+ for(const mode of ['merge','replace'])for(const documents of [...cases.map(d=>[d]),[{kind:'environment',id:'e',data:{values:[]}},{kind:'environment',id:'e',data:{values:[]}}]]){
+  const archive={version:1,documents,files:[],history:[]};await assert.rejects(target.preview(encryptArchive(archive,'p'),'p',mode),/BACKUP_INVALID/);assert.deepEqual(await snapshot(),before);
+  target.sessions.set('malformed',{archive,password:'p',mode,touched:Date.now()});await assert.rejects(target.restore('malformed'),/BACKUP_INVALID/);assert.deepEqual(await snapshot(),before);
+ }
+ for(const mode of ['merge','replace'])for(const history of [{},[null],[{id:'incomplete'}],[{id:'run',responses:'bad'}],[{id:'same'},{id:'same'}]]){
+  const archive={version:1,documents:[],files:[],history};await assert.rejects(target.preview(encryptArchive(archive,'p'),'p',mode),/BACKUP_INVALID/);
+  target.sessions.set('history',{archive,password:'p',mode,touched:Date.now()});await assert.rejects(target.restore('history'),/BACKUP_INVALID/);assert.deepEqual(await snapshot(),before);
+ }
+ assert.deepEqual(await snapshot(),before);
+}));
+test('archive validation preserves valid request IDs and unknown Postman fields without normalization',()=>isolated(async(a,b)=>{
+ const target=new BackupService(b),data={info:{name:'preserved',_postman_id:'postman-original','x-info':{value:1}},'x-future':{unknown:['field']},item:[{id:'original-request',name:'request','x-node':true,request:{method:'GET',url:{raw:'https://example.test',host:['example','test'],query:[{key:'business',value:'original-request'}]},'x-request':{preserve:true}}}]};
+ const archive={version:1,files:[],history:[],documents:[{kind:'collection',id:'original-document',data}]};const before=structuredClone(archive);target.validate(archive);assert.deepEqual(archive,before);
+ await target.restore((await target.preview(encryptArchive(archive,'p'),'p','replace')).transferId);assert.deepEqual((await b.get('collection','original-document',{reveal:true})).data,data);
+}));

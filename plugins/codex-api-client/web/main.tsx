@@ -35,8 +35,8 @@ function App(){
   const [collectionSearch,setCollectionSearch]=useState(''),[sidebarOpen,setSidebarOpen]=useState(true);
   const collectionSearchInput=useRef<HTMLInputElement>(null),editorViews=useRef(new Map<string,string>()),scriptViews=useRef(new Map<string,string>()),startLock=useRef(false);
   const [section,setSection]=useState('collections'),[editorTab,setEditorTab]=useState('参数'),[scriptStage,setScriptStage]=useState('prerequest');
-  const [theme,setTheme]=useState(()=>localStorage.getItem('api-theme')||'light'),[error,setError]=useState(''),[notice,setNotice]=useState('');
-  const [environment,setEnvironment]=useState(()=>localStorage.getItem('api-environment')||''),[busy,setBusy]=useState(false),[results,setResults]=useState<Record<string,any>>({}),[responseTab,setResponseTab]=useState('正文'),[responseIndex,setResponseIndex]=useState(0);
+  const [theme,setTheme]=useState('light'),[error,setError]=useState(''),[notice,setNotice]=useState('');
+  const [environment,setEnvironment]=useState(''),[busy,setBusy]=useState(false),[results,setResults]=useState<Record<string,any>>({}),[responseTab,setResponseTab]=useState('正文'),[responseIndex,setResponseIndex]=useState(0);
   const [modal,setModal]=useState(''),[importText,setImportText]=useState(''),[importFiles,setImportFiles]=useState<Record<string,string>>({}),[importWarnings,setImportWarnings]=useState<string[]>([]),[confirm,setConfirm]=useState<{text:string,action:()=>void}|null>(null);
   const [transferBusy,setTransferBusy]=useState(false),[importDone,setImportDone]=useState(false);
   const transferLock=useRef(false);
@@ -62,11 +62,38 @@ function App(){
   const latest=useRef({tab,tabs});latest.current={tab,tabs};
   function activateTab(next:Tab|undefined){setActive(next?.key||'');setEditorTab(next?(editorViews.current.get(next.key)||(next.doc.kind!=='collection'?'变量':nodeOf(next)?.request?'参数':'概览')):'参数');setScriptStage(next?scriptViews.current.get(next.key)||'prerequest':'prerequest');}
   const safe=async(fn:()=>Promise<any>)=>{setError('');try{return await fn();}catch(e){setError(e instanceof Error?e.message:String(e));return undefined;}};
-  const refresh=async()=>{const s=await call<State>('api_workspace_state');setState(s);setTabs(all=>all.flatMap(t=>{if(t.dirty)return [t];const fresh=(t.doc.kind==='collection'?s.collections:t.doc.kind==='environment'?s.environments:s.globals?[s.globals]:[]).find(d=>d.id===t.doc.id&&d.kind===t.doc.kind);if(!fresh||(t.itemId&&!findItem(fresh.data,t.itemId)))return [];return [fresh.revision>t.doc.revision?{...t,doc:clone(fresh)}:t];}));setReady(true);return s;};
+  const preferencesHydrated=useRef(false),savedPreferences=useRef(''),preferenceWrites=useRef(Promise.resolve());
+  async function persistPreferences(preferences:any){
+    for(let attempt=0;attempt<3;attempt++){
+      const current=await call<State>('api_workspace_state'),doc=current.settings;
+      try{
+        await call('api_document_put',{kind:'settings',id:'default',revision:doc?.revision||0,data:{...doc?.data,selectedEnvironment:preferences.selectedEnvironment,ui:{...doc?.data.ui,...preferences.ui}}});
+        return;
+      }catch(error){if(attempt===2||!String(error).includes('CONFLICT'))throw error;}
+    }
+  }
+  async function hydratePreferences(s:State){
+    if(preferencesHydrated.current)return;
+    preferencesHydrated.current=true;
+    const data=s.settings?.data||{},ui=data.ui||{};
+    const selected=typeof data.selectedEnvironment==='string'?data.selectedEnvironment:localStorage.getItem('api-environment')||'';
+    const preferences={selectedEnvironment:s.environments.some(e=>e.id===selected)?selected:'',ui:{theme:['light','dark'].includes(ui.theme)?ui.theme:(localStorage.getItem('api-theme')==='dark'?'dark':'light'),sidebarOpen:typeof ui.sidebarOpen==='boolean'?ui.sidebarOpen:true,responseTab:['正文','响应头','Cookie','断言','日志','变量变化'].includes(ui.responseTab)?ui.responseTab:'正文'}};
+    setTheme(preferences.ui.theme);setEnvironment(preferences.selectedEnvironment);setSidebarOpen(preferences.ui.sidebarOpen);setResponseTab(preferences.ui.responseTab);
+    savedPreferences.current=JSON.stringify(preferences);
+    if((data.selectedEnvironment===undefined&&localStorage.getItem('api-environment')!==null)||(ui.theme===undefined&&localStorage.getItem('api-theme')!==null))await persistPreferences(preferences);
+  }
+  useEffect(()=>{
+    if(!ready||!preferencesHydrated.current)return;
+    const preferences={selectedEnvironment:environment,ui:{theme,sidebarOpen,responseTab}},serialized=JSON.stringify(preferences);
+    if(serialized===savedPreferences.current)return;
+    savedPreferences.current=serialized;
+    preferenceWrites.current=preferenceWrites.current.then(()=>persistPreferences(preferences)).catch(error=>{setError(String(error));});
+  },[ready,theme,environment,sidebarOpen,responseTab]);
+  const refresh=async()=>{const s=await call<State>('api_workspace_state');await hydratePreferences(s);setState(s);setTabs(all=>all.flatMap(t=>{if(t.dirty)return [t];const fresh=(t.doc.kind==='collection'?s.collections:t.doc.kind==='environment'?s.environments:s.globals?[s.globals]:[]).find(d=>d.id===t.doc.id&&d.kind===t.doc.kind);if(!fresh||(t.itemId&&!findItem(fresh.data,t.itemId)))return [];return [fresh.revision>t.doc.revision?{...t,doc:clone(fresh)}:t];}));setReady(true);return s;};
   useEffect(()=>{if(active&&!tabs.some(t=>t.key===active)){activateTab(tabs[0]);}},[tabs,active]);
   useEffect(()=>{safe(refresh);const timer=setInterval(()=>{refresh().catch(()=>{});},4000);return()=>clearInterval(timer);},[]);
-  useEffect(()=>{document.documentElement.dataset.theme=theme;localStorage.setItem('api-theme',theme);},[theme]);
-  useEffect(()=>{localStorage.setItem('api-environment',environment);},[environment]);
+  useEffect(()=>{document.documentElement.dataset.theme=theme;if(ready)localStorage.setItem('api-theme',theme);},[theme,ready]);
+  useEffect(()=>{if(ready)localStorage.setItem('api-environment',environment);},[environment,ready]);
   useEffect(()=>{if(ready&&environment&&!state.environments.some(e=>e.id===environment))setEnvironment('');},[ready,state.environments,environment]);
   useEffect(()=>{const before=(e:BeforeUnloadEvent)=>{if(latest.current.tabs.some(t=>t.dirty)){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',before);return()=>window.removeEventListener('beforeunload',before);},[]);
   useEffect(()=>{const key=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();if(!document.querySelector('[role=dialog]'))safe(()=>save(latest.current.tab));}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[]);
@@ -200,7 +227,7 @@ function App(){
   if(variableCollection)addVariables(variableCollection.variable,'集合变量');
   const selectedEnvironment=state.environments.find(e=>e.id===environment);
   if(selectedEnvironment)addVariables(draftData('environment',selectedEnvironment.id,selectedEnvironment.data).values,'环境：'+selectedEnvironment.data.name);
-  if(tab?.itemId)for(const parent of findItem(variableCollection||tab.doc.data,tab.itemId)?.parents||[])addVariables(parent.variable,'文件夹：'+parent.name);
+  if(tab?.itemId&&variableCollection&&compatibilityMode(variableCollection)==='extended')for(const parent of findItem(variableCollection||tab.doc.data,tab.itemId)?.parents||[])addVariables(parent.variable,'文件夹：'+parent.name);
   const running=result?.status==='running';
 
   return <div className="app-shell">
@@ -247,7 +274,7 @@ function App(){
     </div>
     {menu&&<TreeMenu target={menu.target} x={menu.x} y={menu.y} onClose={()=>setMenu(null)} onChoose={action=>chooseTree(action,menu.target)}/>}
     {modal==='rename'&&<Modal title="重命名" onClose={()=>setModal('')}><form onSubmit={e=>{e.preventDefault();safe(renameTarget);}}><label>名称<input aria-label="新名称" value={rename} onChange={e=>setRename(e.target.value)} autoFocus/></label><footer><button type="button" onClick={()=>setModal('')}>取消</button><button className="primary" disabled={!rename.trim()||changingStructure}>保存名称</button></footer></form></Modal>}
-    {modal==='backup'&&<WorkspaceBackup context={{selectedEnvironment:environment,ui:{theme,sidebarOpen,responseTab}}} onClose={()=>setModal('')} onRestored={async()=>{const next=await refresh();const saved=next.settings?.data;if(saved?.selectedEnvironment)setEnvironment(saved.selectedEnvironment);if(saved?.ui?.theme)setTheme(saved.ui.theme);if(typeof saved?.ui?.sidebarOpen==='boolean')setSidebarOpen(saved.ui.sidebarOpen);if(saved?.ui?.responseTab)setResponseTab(saved.ui.responseTab);}}/>}
+    {modal==='backup'&&<WorkspaceBackup context={{selectedEnvironment:environment,ui:{theme,sidebarOpen,responseTab}}} onClose={()=>setModal('')} onRestored={async()=>{await preferenceWrites.current;preferencesHydrated.current=false;await refresh();}}/>}
     {modal==='import' &&<Modal title="导入请求" wide onClose={()=>{if(!transferBusy)setModal('');}}><p className="muted">选择工作区备份，一次导入集合、环境、全局变量及 API 脚本；也兼容 Postman Collection v2.1、环境 JSON、cURL、OpenAPI3/Swagger2 JSON/YAML 和 HAR。</p><textarea aria-label="导入内容" rows={8} disabled={transferBusy||importDone} value={importText} onChange={e=>setImportText(e.target.value)} placeholder="curl 'http://localhost:3000/users'"/><label className="file-picker">或选择导入文件<input aria-label="选择导入文件" type="file" disabled={transferBusy||importDone} accept=".json,.txt,.yaml,.yml,.har" onChange={e=>{const f=e.target.files?.[0];if(f)safe(async()=>{setImportFiles({});if(f.size>20*1024*1024)throw new Error('导入文件不能超过 20 MB');setImportText(await f.text());});}}/></label><label className="file-picker">补充 OpenAPI 本地依赖（不会自动读取磁盘或联网）<input aria-label="OpenAPI 本地依赖文件" type="file" multiple accept=".json,.yaml,.yml" disabled={transferBusy||importDone} onChange={e=>{const files=Array.from(e.target.files||[]);safe(()=>loadImportFiles(files));}}/></label><label className="file-picker">或选择依赖目录（相对路径以所选目录为根）<input aria-label="OpenAPI 依赖目录" type="file" {...({webkitdirectory:'',directory:''} as any)} disabled={transferBusy||importDone} onChange={e=>safe(()=>loadImportFiles(Array.from(e.target.files||[]),true))}/></label>{Object.keys(importFiles).length>0&&<><p>{Object.keys(importFiles).join('、')}</p><button onClick={()=>setImportFiles({})}>清空依赖文件</button></>}<ImportPreview text={importText} localFiles={importFiles}/>{importWarnings.length>0&&<div className="warning">已导入，但这些能力需要调整：{importWarnings.map(w=><p key={w}>{w}</p>)}</div>}<footer><button disabled={transferBusy} onClick={()=>setModal('')}>关闭</button><button className="primary" disabled={!importText.trim()||transferBusy||importDone} onClick={()=>safe(importNow)}>{transferBusy?'导入中…':importDone?'已导入':'确认导入'}</button></footer></Modal>}
     {modal==='runner'&&<Modal title={nodeOf(dialogTarget)?.request?'运行请求':dialogTarget?.itemId?'运行文件夹':'运行集合'} onClose={()=>setModal('')}><p>顺序运行 {titleOf(dialogTarget!)} 中的请求与脚本。</p><div className="form-grid"><label>迭代次数<input type="number" min={1} max={1000} value={runOptions.iterations} onChange={e=>setRunOptions({...runOptions,iterations:Number(e.target.value)})}/></label><label>请求间隔（毫秒）<input type="number" min={0} value={runOptions.delay} onChange={e=>setRunOptions({...runOptions,delay:Number(e.target.value)})}/></label></div><label className="checkbox"><input type="checkbox" checked={runOptions.stopOnFailure} onChange={e=>setRunOptions({...runOptions,stopOnFailure:e.target.checked})}/>断言失败或请求出错时停止</label><label>运行数据<select value={dataFormat} onChange={e=>setDataFormat(e.target.value)}><option value="json">JSON</option><option value="csv">CSV</option></select><textarea aria-label="运行数据" rows={5} value={dataText} placeholder="可选：JSON 对象数组或 CSV" onChange={e=>setDataText(e.target.value)}/></label><label className="file-picker">选择数据文件<input type="file" accept=".csv,.json" onChange={e=>{const f=e.target.files?.[0];if(f){setDataFormat(f.name.endsWith('.csv')?'csv':'json');f.text().then(setDataText);}}}/></label><footer><button onClick={()=>setModal('')}>取消</button><button className="primary" disabled={busy} onClick={()=>safe(()=>start(true,dialogTarget))}>开始运行</button></footer></Modal>}
     {modal==='history'&&<Modal title="历史运行结果" wide onClose={()=>setModal('')}><pre>{stringify(result)}</pre><footer><button onClick={()=>safe(()=>download('run-report.json',stringify(result)))}>导出报告</button></footer></Modal>}

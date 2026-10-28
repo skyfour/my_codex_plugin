@@ -1,3 +1,4 @@
+import {validateSettings} from './document-validation.mjs';
 import {ProtocolSessions} from './protocol-sessions.mjs';
 import {webAdapters,validateWebConfig} from './protocol-web.mjs';
 import {grpcAdapter,grpcDefinition} from './protocol-grpc.mjs';
@@ -140,7 +141,7 @@ export class ApiService {
     if (['environment','globals'].includes(kind) && !Array.isArray(data.values)) throw new Error('INVALID_VARIABLES');
     if(['environment','globals'].includes(kind))data={...data,values:data.values.map(v=>({...v,disabled:v.disabled??v.enabled===false}))};
     data=markCredentials(data);
-    if (kind==='settings') validateOptions({...DEFAULT_SETTINGS,...data});
+    if (kind==='settings') validateSettings({...DEFAULT_SETTINGS,...data});
     if(kind==='cookies'&&(!Array.isArray(data.cookies)||data.cookies.some(c=>!c||typeof c.key!=='string'||(typeof c.value!=='string'&&!c.secretRef))))throw new Error('INVALID_COOKIES');
     return this.store.put(kind,id,data,revision);
   }

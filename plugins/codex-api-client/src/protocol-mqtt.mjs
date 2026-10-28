@@ -1,12 +1,34 @@
+import {Duplex,Transform} from 'node:stream';
 import mqtt from 'mqtt';
 import net from 'node:net';
 import tls from 'node:tls';
 export function mqttAdapter(c,h){
  let stopped=false,retries=0,retryTimer,closing;const pending=new Set();
  const url=new URL(c.url),secure=url.protocol==='mqtts:';
- const stream=()=>secure?tls.connect({host:url.hostname,port:Number(url.port)||8883,...(net.isIP(url.hostname)?{}:{servername:url.hostname}),rejectUnauthorized:c.network.strictSSL!==false,...c.tlsBytes}):net.connect({host:url.hostname,port:Number(url.port)||1883});
+ const stream=()=>{
+  const socket=secure?tls.connect({host:url.hostname,port:Number(url.port)||8883,...(net.isIP(url.hostname)?{}:{servername:url.hostname}),rejectUnauthorized:c.network.strictSSL!==false,...c.tlsBytes}):net.connect({host:url.hostname,port:Number(url.port)||1883});
+  let phase='type',remaining=0,multiplier=1,lengthBytes=0;
+  // Inspect decoded bytes before MQTTJS can retain an incomplete declared payload.
+  const bounded=new Transform({transform(chunk,encoding,callback){
+   for(let i=0;i<chunk.length;){
+    if(phase==='payload'){const consumed=Math.min(remaining,chunk.length-i);remaining-=consumed;i+=consumed;if(!remaining)phase='type';continue;}
+    const byte=chunk[i++];
+    if(phase==='type'){phase='length';remaining=0;multiplier=1;lengthBytes=0;continue;}
+    remaining+=(byte&127)*multiplier;lengthBytes++;
+    if(remaining>1024*1024||lengthBytes===4&&(byte&128)){
+     h.fail('PROTOCOL_EVENT_LIMIT');callback(Error('PROTOCOL_EVENT_LIMIT'));return;
+    }
+    multiplier*=128;
+    if(!(byte&128))phase=remaining?'payload':'type';
+   }
+   callback(null,chunk);
+  }});
+  socket.on('error',error=>bounded.destroy(error));
+  bounded.on('error',()=>socket.destroy());
+  return Duplex.from({readable:socket.pipe(bounded),writable:socket});
+ };
  // Direct stream builder prevents MQTTJS_SOCKS_PROXY from silently routing native traffic.
- const client=new mqtt.MqttClient(stream,{username:c.username,password:c.password,clientId:c.clientId,clean:true,resubscribe:false,reconnectPeriod:0,queueQoSZero:false,connectTimeout:c.connectTimeout||30000,rejectUnauthorized:c.network.strictSSL!==false,...c.tlsBytes,socksProxy:null,properties:{maximumPacketSize:1024*1024},protocolVersion:4});
+ const client=new mqtt.MqttClient(stream,{username:c.username,password:c.password,clientId:c.clientId,clean:true,resubscribe:false,reconnectPeriod:0,queueQoSZero:false,connectTimeout:c.connectTimeout||30000,rejectUnauthorized:c.network.strictSSL!==false,...c.tlsBytes,socksProxy:null,protocolVersion:4});
  const close=()=>{if(stopped)return closing;stopped=true;clearTimeout(retryTimer);for(const reject of pending)reject(Error('PROTOCOL_CANCELLED'));closing=new Promise(resolve=>client.end(true,{},resolve));return closing;};h.signal.addEventListener('abort',close,{once:true});
  client.on('connect',()=>{h.emit('connected',{sessionPresent:false});h.open();});
  client.on('message',(topic,payload,packet)=>{if(payload.length>1024*1024){h.fail('PROTOCOL_EVENT_LIMIT');return;}h.emit('message',{topic,payload,qos:packet.qos,retain:packet.retain,dup:packet.dup});});

@@ -1,3 +1,4 @@
+import {validateDocument,validateHistory} from './document-validation.mjs';
 import {uniqueName} from './workspace-transfer.mjs';
 import {randomBytes,randomUUID,scryptSync,createCipheriv,createDecipheriv,createHash} from 'node:crypto';
 import {readFileSync,writeFileSync,mkdirSync,rmSync,realpathSync,statSync,readdirSync} from 'node:fs';
@@ -98,8 +99,11 @@ export class BackupService {
  async export(password,includeHistory=false,context){return encryptArchive(await this.capture(includeHistory,context),password);}
  async preview(bytes,password,mode='merge',context){const archive=decryptArchive(bytes,password);this.validate(archive);const transferId=randomUUID();this.sessions.set(transferId,{archive,password,mode,context,touched:Date.now()});const counts=kind=>archive.documents.filter(d=>d.kind===kind).length;return {transferId,collectionCount:counts('collection'),environmentCount:counts('environment'),credentialCount:JSON.stringify(archive).match(/"type":"secret"/g)?.length||0,fileCount:archive.files.length,cookieCount:archive.documents.find(d=>d.kind==='cookies')?.data.cookies?.length||0,conflicts:(await Promise.all(archive.documents.filter(d=>['globals','settings','cookies'].includes(d.kind)&&this.store.row(d.kind,'default')).map(async d=>conflictRows(d.kind,(await this.store.get(d.kind,'default',{reveal:true})).data,d.data)))).flat(),mode};}
  validate(archive){
+  try{
+  if(!archive||typeof archive!=='object')fail();
   if(archive.version!==1||!Array.isArray(archive.documents)||archive.documents.length>5000||!Array.isArray(archive.files)||archive.files.length>1000)fail();
-  const ids=new Set(),referenced=new Set();
+  const ids=new Set(),referenced=new Set(),documents=new Set();
+  try{validateHistory(archive.history??[]);}catch{fail();}
   for(const file of archive.files){
    if(!/^[\da-f-]{36}$/.test(file.id)||ids.has(file.id)||typeof file.name!=='string'||file.name!==basename(file.name)||file.name==='..'||file.name.includes('\\'))fail();
    ids.add(file.id);
@@ -109,12 +113,17 @@ export class BackupService {
   for(const document of archive.documents){
    if(typeof document.id!=='string'||!document.id||document.id.length>200)fail();
    if(!['collection','environment','globals','settings','cookies'].includes(document.kind)||!document.data||typeof document.data!=='object')fail();
+   const identity=JSON.stringify([document.kind,document.id]);
+   if(documents.has(identity)||(['globals','settings','cookies'].includes(document.kind)&&document.id!=='default'))fail();
+   documents.add(identity);
+   try{validateDocument(document.kind,document.data);}catch{fail();}
    visitAttachmentLocations(document.kind,document.data,path=>{
     if(!path.startsWith('backup-file:')||!ids.has(path.slice(12)))fail();
     referenced.add(path.slice(12));return path;
    });
   }
   if(ids.size!==referenced.size)fail();
+  }catch{fail();}
  }
  async restore(id,decisions={}){
   const session=this.sessions.get(id);

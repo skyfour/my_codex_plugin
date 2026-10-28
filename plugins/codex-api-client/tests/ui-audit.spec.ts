@@ -25,6 +25,8 @@ test('method rows scripts Cookie and uploaded import controls perform their acti
  await page.getByRole('button',{name:'导入',exact:true}).click();await page.getByRole('dialog',{name:'导入请求'}).getByLabel('选择导入文件',{exact:true}).setInputFiles({name:'audit.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({name:'文件导入的环境',values:[]}))});await expect(page.getByLabel('导入内容')).toHaveValue(/文件导入的环境/);await page.getByRole('button',{name:'确认导入',exact:true}).click();await expect(page.getByRole('button',{name:'选择环境'})).toContainText('文件导入的环境');
 });
 for(const size of [{width:1440,height:950},{width:820,height:600},{width:620,height:500}])test(`all modal and editor controls receive pointer at ${size.width}x${size.height}`,async({page})=>{
+ // Narrow panels require more scroll/paint steps across both themes; each control still has a 2500ms trial-click limit.
+ if(size.width===620)test.setTimeout(60000);
  await page.setViewportSize(size);const tree=await fixture(page),audit=await auditSession(page,`api-${size.width}`);await tree.getByRole('button',{name:'示例请求',exact:true}).click();
  for(const theme of ['light','dark']){
   if(await page.locator('html').getAttribute('data-theme')!==theme)await page.getByLabel('切换主题').click();
