@@ -20,10 +20,12 @@ export class ProtocolSessions {
  emit(s,type,data){
   if(['closed','failed'].includes(s.state)&&type!=='state')return;
   const secrets=s.secrets.filter(Boolean).map(String);
-  // Binary is sanitized as bytes before encoding; arbitrary binary cannot safely use UTF-8 replacement.
-  const visit=v=>{if(Buffer.isBuffer(v)||v instanceof Uint8Array){let b=Buffer.from(v);for(const secret of secrets){const needle=Buffer.from(secret);let at;while((at=b.indexOf(needle))>=0)b=Buffer.concat([b.subarray(0,at),Buffer.from('[REDACTED]'),b.subarray(at+needle.length)]);}return {encoding:'base64',base64:b.toString('base64'),size:b.length};}if(Array.isArray(v))return v.map(visit);if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,visit(x)]));return v;};
-  const needles=secrets.flatMap(v=>[v,Buffer.from(v).toString('base64'),Buffer.from(v).toString('hex'),encodeURIComponent(v)]);
-  let clean=redact(visit(data),needles);let bytes=Buffer.byteLength(JSON.stringify(clean)??'null');
+  const needles=[...new Set(secrets.flatMap(v=>[v,Buffer.from(v).toString('base64'),Buffer.from(v).toString('hex'),encodeURIComponent(v)]))].sort((a,b)=>b.length-a.length);
+  const byteNeedles=needles.map(v=>Buffer.from(v));
+  // Search original bytes only: inserted markers may themselves contain a secret.
+  const cleanBinary=value=>{const original=Buffer.from(value),parts=[];let cursor=0;while(cursor<original.length){let next=-1,matched;for(const needle of byteNeedles){const at=original.indexOf(needle,cursor);if(at>=0&&(next<0||at<next)){next=at;matched=needle;}}if(next<0){parts.push(original.subarray(cursor));break;}parts.push(original.subarray(cursor,next),Buffer.from('[REDACTED]'));cursor=next+matched.length;}return Buffer.concat(parts);};
+  const visit=v=>{if(Buffer.isBuffer(v)||v instanceof Uint8Array){const b=cleanBinary(v);return {encoding:'base64',base64:b.toString('base64'),size:b.length};}if(typeof v==='string')return redact(v,needles);if(Array.isArray(v))return v.map(visit);if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,visit(x)]));return v;};
+  let clean=visit(data);let bytes=Buffer.byteLength(JSON.stringify(clean)??'null');
   if(bytes>PROTOCOL_LIMITS.eventBytes){type='error';clean='PROTOCOL_EVENT_LIMIT: 单条事件超过 1 MiB';bytes=Buffer.byteLength(JSON.stringify(clean));}
   const event={seq:++s.seq,time:new Date().toISOString(),type,data:clean};bytes=Buffer.byteLength(JSON.stringify(event));s.events.push({event,bytes});s.bytes+=bytes;
   while(s.events.length>PROTOCOL_LIMITS.events||s.bytes>PROTOCOL_LIMITS.bytes)s.bytes-=s.events.shift().bytes;
