@@ -12,10 +12,12 @@ export class ThreadService {
   if(!prior){
    if(!isAbsolute(cwd)||/[\x00-\x1f]/.test(cwd)||!await stat(cwd).then(s=>s.isDirectory(),()=>false))throw new Error('INVALID_CWD');
    this.store.reserveCreation(requestId,taskId,title,cwd);
-   try{const thread=await this.provider.create(cwd,t=>this.store.saveCreation(requestId,t),title);this.store.saveCreation(requestId,thread);}catch(e){prior=this.store.creation(requestId);if(!prior.thread){if(e.thread)return {thread:e.thread,bound:false};throw e;}}
+   try{const thread=await this.provider.create(cwd,t=>this.store.saveCreation(requestId,t),title);this.store.saveCreation(requestId,thread);}catch(e){prior=this.store.creation(requestId);if(!prior.thread){if(e.thread){if(this.provider.verifyCreated)await this.provider.verifyCreated(e.thread.id);return {thread:e.thread,bound:false};}throw e;}}
    prior=this.store.creation(requestId);
   }
   if(!prior.thread)throw new Error('CREATION_UNKNOWN');
+  // A known ID is recovery information, not proof that its rollout was saved.
+  if(this.provider.verifyCreated)await this.provider.verifyCreated(prior.thread.id);
   try{this.store.bindThreads(taskId,[prior.thread]);return {thread:prior.thread,bound:true};}
   catch{return {thread:prior.thread,bound:false};}
  }
