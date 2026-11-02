@@ -5,7 +5,7 @@
 ## 前置条件与安装限制
 
 - macOS、Node.js ≥22.13（建议 Node 24 LTS，含 npm）、Git。
-- 已登录 Codex 桌面版与 CLI；CLI 需支持 `codex plugin`。关联／新建会话还需支持 `codex app-server --stdio`。
+- 已登录 Codex 桌面版与 CLI；CLI 需支持 `codex plugin`。关联／新建会话还需支持 `codex app-server --stdio`，按项目新建还需支持原生 `project/list`、`thread/start.projectId` 与 `runtimeWorkspaceRoots` 接口。
 - TAPD 导入需要可访问的 TAPD 工作空间、账户完整姓名和有效 Access Token。凭据只在本机配置。
 - 当前仓库的完整安装流程仅支持 macOS；不会自动导入任务，也不会向 TAPD 回写状态。
 
@@ -30,7 +30,7 @@ npm run install:task-panel
 
 在「设置 → 数据源」配置 TAPD 工作空间、账户完整姓名，再在「本地凭据」输入 Access Token 并保存。输入隐藏，保存后清空，不返回令牌。仓库根目录执行 `npm --prefix plugins/codex-task-panel run configure` 仍可作为备用方式；即使配置了环境变量 `TAPD_ACCESS_TOKEN`，输入框仍可编辑；重新保存的本地令牌立即优先生效，旧配置在重新保存前保持原优先级。看板中「导入任务」需要用户查询、勾选、确认，不自动导入。
 
-点击任务可绑定已有会话或新建空会话。创建时等待会话保存并释放写锁，再绑定并请求打开，不自动发送任务或启动执行；解除关联不删除会话。宿主版本不支持会话跳转时，可按界面显示的 `codex resume <ID>` 恢复。
+点击任务可绑定已有会话，或选择 Codex 中已有的本机项目新建空会话。项目列表沿用桌面端的名称和顺序，展示项目全部工作目录；不需要手填路径，也不会从最近会话猜测项目。创建时等待会话保存并释放写锁，再绑定并请求打开，不自动发送任务或启动执行；解除关联不删除会话。宿主版本不支持会话跳转时，可按界面显示的 `codex resume <ID>` 恢复。
 
 数据保存在 `${CODEX_HOME:-~/.codex}/task-panel/board.sqlite`，凭据在同目录 `credentials.json`（0600）。`TASK_PANEL_HOME` 可指定独立目录；配置终端与 Codex 应使用相同环境变量。升级保留本地泳道和关联，数据库升级后不支持直接降级。
 
@@ -51,6 +51,8 @@ npm run install:task-panel
 
 **无法创建或跳转 Codex 会话？** 先确认 CLI 已登录且支持 `app-server --stdio`。宿主不支持跳转时可按界面中的 `codex resume <ID>` 恢复；创建会话只绑定并请求打开，不自动执行任务。
 
+**创建失败后如何恢复？** 尚未开始创建时可直接修改标题和项目后重试；结果不确定时，重试会复用原请求与已知 ID。弹窗提供「检查已有会话」和「核对后重新选择项目」，不会把重复新建当作自动重试。项目加载失败可单独刷新，标题草稿保留。
+
 **换电脑后任务不见了？** 各电脑的本地泳道和会话关联独立。先在新电脑安装并配置 TAPD，再重新导入所需任务；迁移本地数据库前先关闭对应服务。
 
 **安装成功却没有左侧入口？** 确认 `node` 和 `codex` 位于桌面应用能继承的 PATH，插件已启用，再重新打开 Codex 并新建聊天。更多排查见[仓库常见问题](../../README.md#常见问题)。
@@ -61,4 +63,4 @@ npm run install:task-panel
 
 在仓库根目录执行 `npm run test:task-panel-ui` 验证浏览器交互，需要 Chrome。开发预览使用隔离的 `TASK_PANEL_HOME`，不要写入正式任务目录。
 
-在仓库根目录执行 `node plugins/codex-task-panel/scripts/qa-codex.mjs`，可在独立临时 Codex 目录中验证空会话保存及跨连接恢复，不会发送消息。设置 `TASK_PANEL_CODEX_BINARY` 可指定待验证的 Codex 可执行文件。
+在仓库根目录执行 `node --experimental-sqlite plugins/codex-task-panel/scripts/qa-codex.mjs`，可在独立临时 Codex 目录中验证空会话保存及跨连接恢复，不会发送消息。设置 `TASK_PANEL_CODEX_BINARY` 可指定待验证的 Codex 可执行文件。

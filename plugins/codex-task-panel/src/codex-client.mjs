@@ -3,7 +3,7 @@ import {createInterface} from 'node:readline';
 import {stat} from 'node:fs/promises';
 
 // Each operation owns one short-lived stdio connection; never send turn/start.
-export async function withCodex(fn,{launch=spawn,timeout=15000,shutdownTimeout=15000}={}){
+export async function withCodex(fn,{launch=spawn,timeout=15000,shutdownTimeout=15000,experimentalApi=false}={}){
  const grouped=process.platform!=='win32';
  const child=launch('codex',['app-server','--stdio'],{stdio:['pipe','pipe','pipe'],detached:grouped}),pending=new Map();let seq=0,failed=false,closed=false,operationFailed=false;
  const exited=new Promise(resolve=>child.once('close',()=>{closed=true;resolve();}));
@@ -17,7 +17,7 @@ export async function withCodex(fn,{launch=spawn,timeout=15000,shutdownTimeout=1
   const id=++seq,timer=setTimeout(()=>{pending.delete(id);const error=new Error('CODEX_TIMEOUT');error.method=method;reject(error);},timeout);
   pending.set(id,{resolve,reject,timer});child.stdin.write(JSON.stringify({id,method,params})+'\n');
  });
- try{await call('initialize',{clientInfo:{name:'codex-task-panel',version:'0.4.0'}});child.stdin.write('{"method":"initialized"}\n');return await fn(call);}
+ try{await call('initialize',{clientInfo:{name:'codex-task-panel',version:'0.4.9'},...(experimentalApi?{capabilities:{experimentalApi:true}}:{})});child.stdin.write('{"method":"initialized"}\n');return await fn(call);}
  catch(error){operationFailed=true;throw error;}
  finally{
   fail('CODEX_UNAVAILABLE');
@@ -49,5 +49,5 @@ export class CodexThreads {
   if(threadSummary(thread).id!==id||typeof thread.path!=='string'||!await stat(thread.path).then(s=>s.isFile()&&s.size>0,()=>false))throw new Error('CREATION_UNKNOWN');
  });}
  inspect(ids){return this.connect(call=>Promise.all(ids.map(async id=>{try{return {...threadSummary((await call('thread/read',{threadId:id,includeTurns:false})).thread),available:true};}catch{return {id,available:false};}})));}
- async create(cwd,onCreated,title){let thread;try{return await this.connect(async call=>{thread=threadSummary((await call('thread/start',{cwd,ephemeral:false})).thread);onCreated(thread);await call('thread/name/set',{threadId:thread.id,name:title});return {...thread,title};});}catch(e){if(e.method==='thread/start'&&e.message==='CODEX_TIMEOUT')e.message='CREATION_TIMEOUT';if(thread)e.thread=thread;throw e;}}
+ async create(cwd,onCreated,title,project){let thread,creationAttempted=false;try{return await this.connect(async call=>{creationAttempted=true;thread=threadSummary((await call('thread/start',{cwd,ephemeral:false,...(project?{projectId:project.nativeId,runtimeWorkspaceRoots:project.roots}:{})})).thread);onCreated(thread);await call('thread/name/set',{threadId:thread.id,name:title});return {...thread,title};},{experimentalApi:Boolean(project)});}catch(e){e.creationAttempted=creationAttempted;if(e.method==='thread/start'&&e.message==='CODEX_TIMEOUT')e.message='CREATION_TIMEOUT';if(thread)e.thread=thread;throw e;}}
 }

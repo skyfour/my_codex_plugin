@@ -22,7 +22,7 @@ export class BoardStore {
       CREATE TABLE IF NOT EXISTS config(id INTEGER PRIMARY KEY CHECK(id=1),workspace_id TEXT NOT NULL DEFAULT '',owner_name TEXT NOT NULL DEFAULT '',version INTEGER NOT NULL DEFAULT 1,identity_json TEXT);
       INSERT OR IGNORE INTO config(id) VALUES(1);`);
     const schema=this.db.prepare("SELECT value FROM meta WHERE key='schema'").get().value;
-    if(![1,2,3].includes(schema))throw new Error('UNSUPPORTED_SCHEMA');
+    if(![1,2,3,4].includes(schema))throw new Error('UNSUPPORTED_SCHEMA');
     this.transaction(()=>{this.db.exec(`CREATE TABLE IF NOT EXISTS task_threads(task_id TEXT NOT NULL REFERENCES tasks(id),thread_id TEXT NOT NULL,title TEXT NOT NULL,cwd TEXT NOT NULL,bound_at INTEGER NOT NULL,PRIMARY KEY(task_id,thread_id));
       CREATE TABLE IF NOT EXISTS thread_creations(request_id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES tasks(id),title TEXT NOT NULL,cwd TEXT NOT NULL,thread_json TEXT);
 `);});
@@ -31,7 +31,8 @@ export class BoardStore {
       this.db.exec(`CREATE TABLE IF NOT EXISTS workflow_transitions(from_lane_id TEXT NOT NULL REFERENCES lanes(id) ON DELETE CASCADE,to_lane_id TEXT NOT NULL REFERENCES lanes(id) ON DELETE CASCADE,PRIMARY KEY(from_lane_id,to_lane_id),CHECK(from_lane_id<>to_lane_id));
         INSERT OR IGNORE INTO meta VALUES('workflow_version',1);`);
       if(schema<3){const lanes=this.db.prepare('SELECT id FROM lanes ORDER BY position,id').all();for(let i=1;i<lanes.length;i++)this.db.prepare('INSERT OR IGNORE INTO workflow_transitions VALUES(?,?)').run(lanes[i-1].id,lanes[i].id);}
-      this.db.exec("UPDATE meta SET value=3 WHERE key='schema'");
+      if(!this.db.prepare('PRAGMA table_info(thread_creations)').all().some(c=>c.name==='project_id'))this.db.exec('ALTER TABLE thread_creations ADD COLUMN project_id TEXT');
+      this.db.exec("UPDATE meta SET value=4 WHERE key='schema'");
     });
   }
   workflow(){return {version:this.db.prepare("SELECT value FROM meta WHERE key='workflow_version'").get().value,transitions:this.db.prepare('SELECT from_lane_id AS fromLaneId,to_lane_id AS toLaneId FROM workflow_transitions ORDER BY from_lane_id,to_lane_id').all()};}
@@ -55,7 +56,8 @@ export class BoardStore {
   bindThreads(taskId,threads){this.getTask(taskId);this.transaction(()=>{for(const t of threads)this.db.prepare('INSERT OR IGNORE INTO task_threads VALUES(?,?,?,?,?)').run(taskId,t.id,t.title,t.cwd,Date.now());});}
   unbindThread(taskId,threadId){this.getTask(taskId);this.db.prepare('DELETE FROM task_threads WHERE task_id=? AND thread_id=?').run(taskId,threadId);}
   creation(id){const r=this.db.prepare('SELECT * FROM thread_creations WHERE request_id=?').get(id);return r?{...r,thread:r.thread_json?JSON.parse(r.thread_json):null}:null;}
-  reserveCreation(id,taskId,title,cwd){this.getTask(taskId);this.db.prepare('INSERT INTO thread_creations VALUES(?,?,?,?,NULL)').run(id,taskId,title,cwd);}
+  reserveCreation(id,taskId,title,cwd,projectId=null){this.getTask(taskId);this.db.prepare('INSERT INTO thread_creations(request_id,task_id,title,cwd,thread_json,project_id) VALUES(?,?,?,?,NULL,?)').run(id,taskId,title,cwd,projectId);}
+  releaseUnstartedCreation(id){this.db.prepare('DELETE FROM thread_creations WHERE request_id=? AND thread_json IS NULL').run(id);}
   saveCreation(id,thread){this.db.prepare('UPDATE thread_creations SET thread_json=? WHERE request_id=?').run(JSON.stringify(thread),id);}
   config(){const c=this.db.prepare('SELECT * FROM config WHERE id=1').get();return {workspaceId:c.workspace_id,ownerName:c.owner_name,version:c.version,identity:c.identity_json?JSON.parse(c.identity_json):null};}
   configure({workspaceId,ownerName,version}){
