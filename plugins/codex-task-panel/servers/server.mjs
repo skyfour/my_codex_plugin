@@ -10,6 +10,7 @@ import {z} from 'zod';
 import {readScmKeyword} from '../src/tapd.mjs';
 import {BoardStore} from '../src/store.mjs';
 import {ThreadService} from '../src/thread-service.mjs';
+import {CodexProjects} from '../src/codex-projects.mjs';
 import {ImportService} from '../src/import-service.mjs';
 import {loadToken,saveToken} from '../src/credentials.mjs';
 import {errorText,errorCode} from '../src/errors.mjs';
@@ -21,10 +22,10 @@ import {loadBoardHtml} from '../src/ui-resource.mjs';
 const sidebarIcons=[{src:`data:image/svg+xml;base64,${readFileSync(new URL('../assets/icon-sidebar.svg',import.meta.url)).toString('base64')}`,mimeType:'image/svg+xml',sizes:['any']}];
 export const BOARD_URI='ui://codex-task-panel/v1.html';
 export const defaultDataDir=()=>process.env.TASK_PANEL_HOME??join(process.env.CODEX_HOME??join(homedir(),'.codex'),'task-panel');
-export function createPanelServer({dataDir=defaultDataDir(),env=process.env,store=new BoardStore(join(dataDir,'board.sqlite')),credentials=()=>loadToken(dataDir,env),read,threads,scmRead=readScmKeyword}={}){
+export function createPanelServer({dataDir=defaultDataDir(),env=process.env,store=new BoardStore(join(dataDir,'board.sqlite')),credentials=()=>loadToken(dataDir,env),read,threads,projects=new CodexProjects({codeHome:env.CODEX_HOME??join(homedir(),'.codex')}),scmRead=readScmKeyword}={}){
   const commitContexts=new CommitContextService({store,credentials,readKeyword:scmRead});
-  const sessions=new ThreadService(store,threads);
-  const imports=new ImportService({store,credentials,read}),server=new McpServer({name:'codex-task-panel',version:'0.4.7'}),actions=new Map(),toolDefinitions=[];
+  const sessions=new ThreadService(store,threads,projects);
+  const imports=new ImportService({store,credentials,read}),server=new McpServer({name:'codex-task-panel',version:'0.4.9'}),actions=new Map(),toolDefinitions=[];
   const summaries=()=>{const snapshot=store.snapshot();return {...snapshot,tasks:snapshot.tasks.map(({body,...t})=>t)};};
   const status=async()=>{let credentialReady=false,credentialError=null;try{credentialReady=Boolean(await credentials());}catch(e){credentialError=errorText(e);}return {config:store.config(),credentialReady,credentialError,credentialEnv:Boolean(env.TAPD_ACCESS_TOKEN),lastImport:store.history()[0]??null};};
   const output=(data)=>({content:[{type:'text',text:'操作完成'}],structuredContent:data});
@@ -43,10 +44,11 @@ export function createPanelServer({dataDir=defaultDataDir(),env=process.env,stor
   register('task_scm_fetch',z.object({id}).strict(),async({id})=>{await commitContexts.get(id,{refresh:true});return {task:{...store.getTask(id),scmKeyword:store.scmKeyword(id)}};},{app:true,readonly:false,description:'只读查询 TAPD 源码关键字并缓存到本地任务，不修改 TAPD。'});
   register('task_scm_save',z.object({id,keyword:z.string().max(2048)}).strict(),({id,keyword})=>store.saveScmKeyword(id,keyword),{app:true,readonly:false,description:'保存用户从 TAPD 复制的源码关键字，仅存本地。'});
   register('thread_candidates',z.object({search:z.string().max(256).optional(),cursor:z.string().max(4096).optional()}).strict(),args=>sessions.candidates(args),{app:true});
+  register('project_list',empty,()=>projects.list(),{app:true,description:'只读列出 Codex 已有本机项目；不从会话历史推断项目，不创建项目。'});
   register('task_threads',z.object({taskId:id}).strict(),async({taskId})=>({threads:await sessions.linked(taskId)}),{app:true});
   register('thread_bind',z.object({taskId:id,threadIds:z.array(id).min(1).max(100)}).strict(),async({taskId,threadIds})=>{await sessions.bind(taskId,threadIds);return {...summaries(),threads:store.threads(taskId)};},{app:true,readonly:false});
   register('thread_unbind',z.object({taskId:id,threadId:id}).strict(),({taskId,threadId})=>{store.unbindThread(taskId,threadId);return {...summaries(),threads:store.threads(taskId)};},{app:true,readonly:false});
-  register('thread_create',z.object({taskId:id,requestId:id,title:z.string().trim().min(1).max(512),cwd:z.string().min(1).max(4096)}).strict(),async args=>({...await sessions.create(args),...summaries()}),{app:true,readonly:false,description:'仅响应用户点击新建会话，创建空会话并绑定；禁止发送消息或启动执行。'});
+  register('thread_create',z.object({taskId:id,requestId:id,title:z.string().trim().min(1).max(512),projectId:z.string().min(1).max(512)}).strict(),async args=>({...await sessions.create(args),...summaries()}),{app:true,readonly:false,description:'仅响应用户选择 Codex 已有项目并点击新建，创建空会话并绑定；禁止发送消息或启动执行。'});
   register('source_status',empty,status);
   register('credential_configure',z.object({token:z.string().trim().min(1).max(4096)}).strict(),async({token})=>{await saveToken(dataDir,token);return status();},{app:true,readonly:false,description:'仅供用户在设置界面保存本机 TAPD 凭据；不返回令牌，不发起网络请求。'});
   register('source_configure',z.object({workspaceId:z.string().regex(/^\d{1,32}$/),ownerName:z.string().min(1).max(128),version}).strict(),async args=>{store.configure(args);return {...summaries(),...await status()};},{app:true,readonly:false});
