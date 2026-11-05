@@ -31,3 +31,26 @@ test('MCP reports missing credentials without exposing any secret',async()=>{
  const store=new BoardStore(':memory:');store.configure({workspaceId:'100',ownerName:'示例',version:1});const {server}=createPanelServer({store,credentials:async()=>null});const client=new Client({name:'test',version:'1'});const [a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
  try{const r=await client.callTool({name:'import_preview',arguments:{}});assert.equal(r.isError,true);assert.match(r.content[0].text,/凭据/);}finally{await client.close();await server.close();store.close();}
 });
+
+test('task_get resolves saved TAPD links locally, preserves full context and rejects unrelated sources',async()=>{
+ const store=new BoardStore(':memory:'),record=source('1',{body:'<p>完整任务背景</p>'.repeat(1000)});store.applyImport([record],{runId:'seed'});
+ const task=store.snapshot().tasks[0];store.saveScmKeyword(task.id,'--task=1@tapd-100');let networkReads=0;
+ const {server}=createPanelServer({store,credentials:async()=>{networkReads++;throw Error('unexpected credential access');},read:async()=>{networkReads++;throw Error('unexpected TAPD access');}});
+ const client=new Client({name:'test',version:'1'}),[a,b]=InMemoryTransport.createLinkedPair();await server.connect(a);await client.connect(b);
+ try{
+  for(const url of [record.url,record.url+'?from=share#detail']){
+   const result=await client.callTool({name:'task_get',arguments:{url}});assert.equal(result.isError,undefined);
+   assert.deepEqual(result.structuredContent.task,{...task,scmKeyword:'--task=1@tapd-100'});
+  }
+  store.applyImport([source('1',{title:'更新后的标题',sourceUpdatedAt:2000})],{runId:'update'});
+  const updated=await client.callTool({name:'task_get',arguments:{url:record.url}});assert.equal(updated.structuredContent.task.title,'更新后的标题');
+  for(const url of ['https://www.tapd.cn/100/prong/tasks/view/2','https://www.tapd.cn/200/prong/tasks/view/1']){
+   const result=await client.callTool({name:'task_get',arguments:{url}});assert.equal(result.isError,true);assert.equal(result.structuredContent.code,'TASK_NOT_FOUND');
+  }
+  for(const url of ['not a URL','javascript:alert(1)','https://evil.example/100/prong/tasks/view/1','https://www.tapd.cn.evil.example/100/prong/tasks/view/1','https://user@www.tapd.cn/100/prong/tasks/view/1','https://www.tapd.cn/100/prong/stories/view/1']){
+   const result=await client.callTool({name:'task_get',arguments:{url}});assert.equal(result.isError,true);assert.equal(result.structuredContent.code,'INVALID_SOURCE_URL');
+  }
+  for(const args of [{},{id:task.id,url:record.url}])assert.equal((await client.callTool({name:'task_get',arguments:args})).isError,true);
+  assert.equal(networkReads,0);
+ }finally{await client.close();await server.close();store.close();}
+});

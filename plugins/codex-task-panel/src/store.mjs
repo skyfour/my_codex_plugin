@@ -2,7 +2,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {randomUUID,createHash} from 'node:crypto';
 import {mkdirSync,chmodSync} from 'node:fs';
 import {dirname} from 'node:path';
-import {normalizeSourceInput,sourceKey,sourceHash} from './source-input.mjs';
+import {normalizeSourceInput,sourceKey,sourceHash,sourceFromTaskUrl} from './source-input.mjs';
 
 const laneName=value=>{if(typeof value!=='string'||!value.trim()||value.trim().length>48||/[\x00-\x1f]/.test(value))throw new Error('INVALID_LANE_NAME');return value.trim();};
 const revision=value=>{if(!Number.isSafeInteger(value)||value<1)throw new Error('VERSION_CONFLICT');};
@@ -49,6 +49,7 @@ export class BoardStore {
   taskRow(r){return r?{...JSON.parse(r.source_json),id:r.id,laneId:r.lane_id,position:r.position,version:r.version,hash:r.hash,importedAt:r.imported_at,threadCount:this.db.prepare('SELECT COUNT(*) AS n FROM task_threads WHERE task_id=?').get(r.id).n}:null;}
   snapshot(){return {workflow:this.workflow(),lanes:this.db.prepare('SELECT id,name,position,version FROM lanes ORDER BY position,id').all(),tasks:this.db.prepare('SELECT * FROM tasks ORDER BY position,id').all().map(r=>this.taskRow(r))};}
   getTask(id){const task=this.taskRow(this.db.prepare('SELECT * FROM tasks WHERE id=?').get(id));if(!task)throw new Error('TASK_NOT_FOUND');return task;}
+  getTaskByUrl(url){const task=this.findSource(sourceFromTaskUrl(url));if(!task)throw new Error('TASK_NOT_FOUND');return task;}
   scmKeyword(id){this.getTask(id);return this.db.prepare('SELECT keyword FROM task_scm WHERE task_id=?').get(id)?.keyword??'';}
   saveScmKeyword(id,keyword){this.getTask(id);if(typeof keyword!=='string'||keyword.length>2048||/[\x00-\x1f]/.test(keyword))throw Error('INVALID_SCM_KEYWORD');this.db.prepare('INSERT INTO task_scm VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET keyword=excluded.keyword').run(id,keyword.trim());return {task:{...this.getTask(id),scmKeyword:this.scmKeyword(id)}};}
   findSource(s){return this.taskRow(this.db.prepare('SELECT * FROM tasks WHERE source_key=?').get(sourceKey(s)));}
