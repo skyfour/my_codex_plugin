@@ -149,3 +149,11 @@ SSE 实时显示多行 data、event、id、retry；WebSocket 可发送文本或 
 MQTT 在 TCP/TLS 解码后、MQTTJS 解析前增量检查 Remaining Length，声明载荷超过1MiB即失败并关闭，不等待完整包。
 
 MCP 的HTTP JSON和旧SSE读取在SDK解析前限制解码后的单次HTTP响应最多10MiB；SSE此限制是一次连接的累计流量，达到上限会明确失败，需显式重新连接，与UI滚动事件窗口的10MiB上限不同。Handlebars使用兼容补丁4.7.10，Zod锁定解析依赖更新至4.6.7；依赖审计仍有16项（8 moderate、8 high），不宣称无漏洞。
+
+## 问题与建议
+
+安装此插件会一并安装反馈技能。重新打开 Codex 并新建聊天后，说“帮我给 codex-api-client 提交 issue”并描述问题；有 GitHub 连接时可按指令提交，否则提供草稿和网页表单。
+
+[报告问题](https://github.com/skyfour/my_codex_plugin/issues/new?template=bug_report.yml) · [提出建议](https://github.com/skyfour/my_codex_plugin/issues/new?template=feature_request.yml) · [已有反馈](https://github.com/skyfour/my_codex_plugin/issues)
+
+请附实际安装版本和复现步骤，移除凭据、业务数据与本机路径。后续在同一 issue 跟进，详见[反馈与维护](../../docs/feedback.md)。

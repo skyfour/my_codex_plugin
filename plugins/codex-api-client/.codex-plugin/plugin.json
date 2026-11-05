@@ -1,6 +1,6 @@
 {
   "name": "codex-api-client",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Local API debugging with Postman scripts, multiple protocols and encrypted workspace backups.",
   "author": {
     "name": "Local developer"

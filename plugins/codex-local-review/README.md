@@ -1,4 +1,4 @@
-# 本地代码审查 0.5.13
+# 本地代码审查 0.5.14
 
 在 Codex 侧栏打开“本地代码审查”，或输入“打开本地代码审查”。参考 Sublime Merge 的仓库浏览与差异审阅流程，提供本地人工 Review，无需远程仓库。
 
@@ -127,3 +127,11 @@ Stage 使用 `git add --all -- <所选具体文件>` 暂存当前磁盘内容（
 在插件目录执行 `npm ci`、`npm test` 和 `npm run check`；在仓库根目录执行 `npm run test:local-review-ui` 运行完整浏览器回归，需要 Chrome。开发时可用 `LOCAL_REVIEW_HOME` 指定隔离目录。
 
 修改审查 UI、Git 刷新或异步状态后，发布前需完成整个 UI 套件。测试产物路径与各项检查见[仓库开发说明](../../README.md#开发与验证)。版本变化见[更新记录](../../CHANGELOG.md)。
+
+## 问题与建议
+
+安装此插件会一并安装反馈技能。重新打开 Codex 并新建聊天后，说“帮我给 codex-local-review 提交 issue”并描述问题；有 GitHub 连接时可按指令提交，否则提供草稿和网页表单。
+
+[报告问题](https://github.com/skyfour/my_codex_plugin/issues/new?template=bug_report.yml) · [提出建议](https://github.com/skyfour/my_codex_plugin/issues/new?template=feature_request.yml) · [已有反馈](https://github.com/skyfour/my_codex_plugin/issues)
+
+请附实际安装版本和复现步骤，移除凭据、业务数据与本机路径。后续在同一 issue 跟进，详见[反馈与维护](../../docs/feedback.md)。

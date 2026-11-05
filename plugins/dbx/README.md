@@ -35,7 +35,7 @@ npm run install:dbx
 
 重新打开 Codex 并新建聊天，确认插件已启用，再点击左侧 DBX 图标。只运行 `git pull` 不会更新已安装的适配器。
 
-**插件版本与官方 DBX 版本分开管理。** 当前适配器版本为 `0.6.42`，它不再约束 Docker 中运行的 DBX 本体版本；当前官方版本在工作台顶部显示。通过兼容预检的官方版本可以直接更新；若上游改变了嵌入接口或出现无法适配的交互，仍需先更新适配器。
+**插件版本与官方 DBX 版本分开管理。** 当前适配器版本为 `0.6.43`，它不再约束 Docker 中运行的 DBX 本体版本；当前官方版本在工作台顶部显示。通过兼容预检的官方版本可以直接更新；若上游改变了嵌入接口或出现无法适配的交互，仍需先更新适配器。
 
 已安装插件需要单独补准备或恢复服务时，在相同环境配置下执行：
 
@@ -170,3 +170,11 @@ node plugins/dbx/scripts/preview.mjs
 - [本插件仓库](https://github.com/skyfour/my_codex_plugin)
 
 适配器按 Apache-2.0 许可维护，见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。官方应用从官方镜像运行，不再从本仓库下载自建 DBX 二进制或专用工作台 HTML。
+
+## 问题与建议
+
+安装此插件会一并安装反馈技能。重新打开 Codex 并新建聊天后，说“帮我给 dbx 提交 issue”并描述问题；有 GitHub 连接时可按指令提交，否则提供草稿和网页表单。
+
+[报告问题](https://github.com/skyfour/my_codex_plugin/issues/new?template=bug_report.yml) · [提出建议](https://github.com/skyfour/my_codex_plugin/issues/new?template=feature_request.yml) · [已有反馈](https://github.com/skyfour/my_codex_plugin/issues)
+
+请附实际安装版本和复现步骤，移除凭据、业务数据与本机路径。后续在同一 issue 跟进，详见[反馈与维护](../../docs/feedback.md)。

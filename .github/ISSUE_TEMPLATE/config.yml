@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 查看已有反馈
+    url: https://github.com/skyfour/my_codex_plugin/issues
+    about: 提交前可以先搜索问题或建议，在已有 issue 中补充信息。

@@ -84,6 +84,7 @@ export function installPlugins(args = process.argv.slice(2)) {
       run(process.execPath, ['--experimental-sqlite', resolve(codeHome, 'plugins/cache', marketplace.name, 'codex-task-panel', version, 'servers/commit-context.mjs'), '--register']);
     }
     console.log(`安装完成：${names.join('、')}。重新打开 Codex 并新建聊天，然后从左侧打开已启用的插件。`);
+    console.log('已包含所选插件的反馈技能：在聊天中说“帮我给这个插件提交 issue”。反馈入口：https://github.com/skyfour/my_codex_plugin/issues/new/choose');
   } else {
     console.log(`插件准备完成：${names.join('、')}。未修改 Codex 安装配置。`);
   }
