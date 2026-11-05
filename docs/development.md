@@ -15,11 +15,11 @@
 | `npm run test:ui` | 运行任务看板、API 调试台和代码审查的完整浏览器测试，需要 Chrome |
 | `npm run test:dbx-ui` | 单独验证 DBX 管理入口与内嵌工作台，需要 Chrome |
 
-每个插件的独立 README 包含开发命令、数据目录和已知限制。浏览器测试截图／JSON 默认写入 `/tmp/codex-plugin-ui-audit`，可通过 `UI_AUDIT_DIR` 指定；代码审查截图还可用 `CODEX_UI_SCREENSHOT_DIR` 设置。
+各插件的完整使用说明保留开发命令、数据目录和已知限制，入口位于对应 README。浏览器测试截图／JSON 默认写入 `/tmp/codex-plugin-ui-audit`，可通过 `UI_AUDIT_DIR` 指定；代码审查截图还可用 `CODEX_UI_SCREENSHOT_DIR` 设置。
 
-## 首页图片
+## README 图片
 
-首页使用仓库内的真实界面截图，通过 `<picture>` 切换深浅主题。图片来源和更新注意事项见[截图说明](assets/readme/README.md)。更新图片应使用临时数据目录和虚构项目，避免拍入日常使用中的任务、凭据或业务代码。
+仓库与四个插件首页使用同一套原创概念插画，统一表达各工具的用途。文件清单、提示词和更新约定见[插画说明](assets/readme/README.md)。图片通过相对路径引用，不依赖外部图床。
 
 ## 设计与验证记录
 
