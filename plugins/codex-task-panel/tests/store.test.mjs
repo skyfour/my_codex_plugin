@@ -14,7 +14,7 @@ test('imports into first lane and persists custom lanes across restart', () => {
   try {let store=new BoardStore(path);const lane=store.snapshot().lanes[0];store.renameLane(lane.id,'待排期',lane.version);
     store.applyImport([source()],{runId:'r1'});store.close();store=new BoardStore(path);
     assert.equal(store.snapshot().lanes[0].name,'待排期');assert.equal(store.snapshot().tasks[0].body,'<p>完整原文</p>');
-    assert.equal(store.snapshot().tasks[0].laneId,lane.id);store.close();
+    assert.equal(store.snapshot().tasks[0].laneId,lane.id);assert.deepEqual(store.getTaskByUrl(source().url),store.snapshot().tasks[0]);store.close();
   } finally {rmSync(dir,{recursive:true,force:true});}
 });
 test('moves within and across lanes and rejects stale card versions',()=>{

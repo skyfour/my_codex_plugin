@@ -24,19 +24,19 @@ export async function auditSession(page,name){
  return {check,screenshot,controls,finish,directory};
 }
 
-export async function mountNative(page,html,actions,theme='light'){
+export async function mountNative(page,html,actions,theme='light',hostResponses={}){
  // localhost gives srcdoc the same secure-context APIs as the desktop host.
  const host=createServer((req,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>Isolated MCP host</title>');});
  await new Promise((resolve,reject)=>{host.once('error',reject);host.listen(0,'127.0.0.1',resolve);});page.once('close',()=>{host.closeAllConnections();host.close();});
  await page.goto(`http://127.0.0.1:${host.address().port}`);
  await page.exposeFunction('pluginTool',(name,args)=>actions.get(name)(args));
  await page.setContent('<style>html,body{margin:0;height:100%;overflow:hidden}iframe{display:block;width:100%;height:100%;border:0}</style><iframe title="Plugin test host"></iframe>');
- await page.evaluate(({html,theme})=>{
+ await page.evaluate(({html,theme,hostResponses})=>{
   window.addEventListener('message',async event=>{
    const message=event.data;if(event.source!==document.querySelector('iframe').contentWindow||message?.jsonrpc!=='2.0'||message.id===undefined)return;
-   try{const result=message.method==='tools/call'?await window.pluginTool(message.params.name,message.params.arguments):{hostContext:{theme}};event.source.postMessage({jsonrpc:'2.0',id:message.id,result},'*');}
+   try{const replies=hostResponses[message.method],result=message.method==='tools/call'?await window.pluginTool(message.params.name,message.params.arguments):replies?.length?replies.shift():{hostContext:{theme}};event.source.postMessage({jsonrpc:'2.0',id:message.id,result},'*');}
    catch(error){event.source.postMessage({jsonrpc:'2.0',id:message.id,error:{message:error.message}},'*');}
   });document.querySelector('iframe').srcdoc=html;
- },{html,theme});
+ },{html,theme,hostResponses});
  return page.frameLocator('iframe');
 }

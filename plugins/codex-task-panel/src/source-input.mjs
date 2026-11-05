@@ -1,5 +1,12 @@
 import {createHash} from 'node:crypto';
 
+export function sourceFromTaskUrl(value) {
+  let url;try{url=new URL(value);}catch{throw new Error('INVALID_SOURCE_URL');}
+  const match=/^\/(\d{1,32})\/prong\/tasks\/view\/(\d{1,32})\/?$/.exec(url.pathname);
+  if(url.origin!=='https://www.tapd.cn'||url.username||url.password||!match)throw new Error('INVALID_SOURCE_URL');
+  return {provider:'tapd',account:match[1],resourceType:'tasks',sourceId:match[2]};
+}
+
 export function normalizeSourceInput(input) {
   if(!input || input.provider!=='tapd' || input.resourceType!=='tasks' ||
     !/^[0-9]{1,32}$/.test(input.account) || !/^[0-9]{1,32}$/.test(input.sourceId) ||

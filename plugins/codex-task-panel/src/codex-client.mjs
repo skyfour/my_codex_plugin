@@ -17,7 +17,7 @@ export async function withCodex(fn,{launch=spawn,timeout=15000,shutdownTimeout=1
   const id=++seq,timer=setTimeout(()=>{pending.delete(id);const error=new Error('CODEX_TIMEOUT');error.method=method;reject(error);},timeout);
   pending.set(id,{resolve,reject,timer});child.stdin.write(JSON.stringify({id,method,params})+'\n');
  });
- try{await call('initialize',{clientInfo:{name:'codex-task-panel',version:'0.4.9'},...(experimentalApi?{capabilities:{experimentalApi:true}}:{})});child.stdin.write('{"method":"initialized"}\n');return await fn(call);}
+ try{await call('initialize',{clientInfo:{name:'codex-task-panel',version:'0.4.10'},...(experimentalApi?{capabilities:{experimentalApi:true}}:{})});child.stdin.write('{"method":"initialized"}\n');return await fn(call);}
  catch(error){operationFailed=true;throw error;}
  finally{
   fail('CODEX_UNAVAILABLE');
