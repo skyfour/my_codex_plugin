@@ -2,16 +2,16 @@
 
 在 Codex 左侧打开任务看板、API 调试台、本地代码审查和 DBX 数据库工作台。通过 GitHub 分发，**每个插件独立安装、独立更新**，无需一次安装全部插件。
 
-[快速开始](#快速开始) · [选择插件](#选择插件) · [安装与更新](#安装与更新) · [常见问题](#常见问题) · [开发与验证](#开发与验证)
+[快速开始](#快速开始) · [选择插件](#选择插件) · [安装与更新](#安装与更新) · [问题与建议](#问题与建议) · [常见问题](#常见问题) · [开发与验证](#开发与验证)
 
 ## 选择插件
 
 | 插件 | 适合做什么 | 插件版本 | 使用与限制 |
 | --- | --- | --- | --- |
 | **任务看板** | 从 TAPD 选择导入任务，安排泳道进度，关联 Codex 会话 | 0.4.10 | [任务看板说明](plugins/codex-task-panel/README.md) |
-| **API 调试台** | 多协议本地调试、Postman 脚本、规范导入与加密工作区迁移 | 0.3.1 | [API 调试台说明](plugins/codex-api-client/README.md) |
-| **本地代码审查** | 浏览 Git 差异与历史，添加批注，暂存、提交和同步分支 | 0.5.13 | [代码审查说明](plugins/codex-local-review/README.md) |
-| **DBX 数据库工作台** | 在侧栏使用完整官方 Docker Web，管理连接、查询数据库 | 0.6.42 | [DBX 说明](plugins/dbx/README.md) |
+| **API 调试台** | 多协议本地调试、Postman 脚本、规范导入与加密工作区迁移 | 0.3.2 | [API 调试台说明](plugins/codex-api-client/README.md) |
+| **本地代码审查** | 浏览 Git 差异与历史，添加批注，暂存、提交和同步分支 | 0.5.14 | [代码审查说明](plugins/codex-local-review/README.md) |
+| **DBX 数据库工作台** | 在侧栏使用完整官方 Docker Web，管理连接、查询数据库 | 0.6.43 | [DBX 说明](plugins/dbx/README.md) |
 
 DBX 表格中的版本是 **Codex 适配器版本**。DBX 本体跟随官方稳定发行版，通过工作台中的更新入口独立更新，无需自行编译；上游交互有较大变化时需先更新适配器。
 
@@ -61,7 +61,7 @@ cd my_codex_plugin
 
 例如，只需要代码审查就执行 `npm run install:local-review`；希望关联 TAPD 任务时，再执行 `npm run install:task-panel`。
 
-每个命令安装所选插件的锁定依赖，执行所需构建与 MCP 检查，再注册到 `my-codex-plugins` 市场。没有默认安装的插件。**安装 DBX 时还会先准备官方 Docker 服务**：首次下载官方镜像、创建并启动容器，完成健康与嵌入兼容预检后才注册插件。终端会显示各阶段进度；Docker、网络或预检失败会使安装失败，不会报告安装成功。已有容器与数据会保留，重跑安装不会强制更新 DBX 本体。
+每个命令安装所选插件的锁定依赖，执行所需构建与 MCP 检查，再注册到 `my-codex-plugins` 市场。没有默认安装的插件。所选插件的反馈技能会一并安装，遇到问题可在聊天中说“帮我给这个插件提交 issue”，详见[问题与建议](#问题与建议)。**安装 DBX 时还会先准备官方 Docker 服务**：首次下载官方镜像、创建并启动容器，完成健康与嵌入兼容预检后才注册插件。终端会显示各阶段进度；Docker、网络或预检失败会使安装失败，不会报告安装成功。已有容器与数据会保留，重跑安装不会强制更新 DBX 本体。
 
 ### 3. 在 Codex 中打开
 
@@ -124,6 +124,14 @@ node scripts/install.mjs --plugin codex-task-panel --plugin codex-local-review
 
 默认数据目录与环境变量分别写在各插件 README。安装／更新不会自动跨设备同步数据。迁移运行中的数据库前先停止对应服务，不要把凭据或数据库提交到 Git。
 
+## 问题与建议
+
+安装任意插件都会一并安装它的反馈技能。重新打开 Codex 并新建聊天后，可以直接说“帮我给任务看板／API 调试台／本地代码审查／DBX 提交 issue”，描述问题或建议；有 GitHub 连接时可按你的指令提交，没有连接时会提供草稿和表单链接。
+
+也可以直接[报告问题](https://github.com/skyfour/my_codex_plugin/issues/new?template=bug_report.yml)、[提出建议](https://github.com/skyfour/my_codex_plugin/issues/new?template=feature_request.yml)或[查看已有反馈](https://github.com/skyfour/my_codex_plugin/issues)。请填写实际插件版本和复现步骤，并移除凭据与业务数据。
+
+维护者可在本仓库对 Codex 说“查看插件反馈”或“处理插件 issue #123”，也可运行 `npm run issues` 查看收件箱。接收 GitHub 通知／邮件与处理流程见[反馈与维护说明](docs/feedback.md)。
+
 ## 常见问题
 
 **为什么不能只在 Codex 中添加 GitHub 仓库？** 这些插件需要安装 npm 依赖，API 调试台还需要构建界面；安装脚本负责准备文件并注册插件。完整流程是「克隆仓库 → 选择安装 → 重开 Codex」。
@@ -145,6 +153,8 @@ node scripts/install.mjs --plugin codex-task-panel --plugin codex-local-review
 | `npm run prepare:plugins` | 显式准备任务看板、API 调试台和代码审查，不注册插件 |
 | `npm run install:dbx -- --prepare` | 单独准备 DBX 适配器，不注册插件或启动 Docker |
 | `npm run setup:dbx` | 准备或恢复官方 DBX Docker 服务，完成健康与兼容预检；不注册插件或强制更新本体 |
+| `npm run issues` | 查看 GitHub Issues 反馈收件箱；加 `-- 123` 可读指定反馈和讨论 |
+| `npm run test:feedback` | 验证反馈收件箱的分页、过滤、错误提示与认证边界 |
 | `npm run validate` | 检查市场、插件版本、MCP 入口与锁定依赖 |
 | `npm test` | 验证结构、安装选择与各插件 Node 测试 |
 | `npm run check` | 检查 API 调试台、代码审查和 DBX 的 stdio MCP 与内联界面；DBX 检查不启动 Docker |
