@@ -34,4 +34,6 @@
 
 只有用户明确要求发布时才递增版本、推送、合并与更新正式安装缓存。开发分支的同版本预览应使用隔离目录，不覆盖已发布安装。
 
+PR 合并后自动删除远端来源分支；同步 `main` 后，也应清理已确认合并的本地分支。squash／rebase 合并以 PR 记录或补丁等价性核对。清理时保留 worktree 中的文件和未提交修改；未合并分支另行确认。
+
 更多说明：[任务提交联动](task-commit-context.md) · [代码审查界面](review-surface.md) · [Git 工作台](git-workbench.md) · [维护约定](../AGENTS.md) · [更新记录](../CHANGELOG.md) · [GitHub Releases](https://github.com/skyfour/my_codex_plugin/releases)
