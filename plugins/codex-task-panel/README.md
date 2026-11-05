@@ -64,3 +64,11 @@ npm run install:task-panel
 在仓库根目录执行 `npm run test:task-panel-ui` 验证浏览器交互，需要 Chrome。开发预览使用隔离的 `TASK_PANEL_HOME`，不要写入正式任务目录。
 
 在仓库根目录执行 `node --experimental-sqlite plugins/codex-task-panel/scripts/qa-codex.mjs`，可在独立临时 Codex 目录中验证空会话保存及跨连接恢复，不会发送消息。设置 `TASK_PANEL_CODEX_BINARY` 可指定待验证的 Codex 可执行文件。
+
+## 问题与建议
+
+安装此插件会一并安装反馈技能。重新打开 Codex 并新建聊天后，说“帮我给 codex-task-panel 提交 issue”并描述问题；有 GitHub 连接时可按指令提交，否则提供草稿和网页表单。
+
+[报告问题](https://github.com/skyfour/my_codex_plugin/issues/new?template=bug_report.yml) · [提出建议](https://github.com/skyfour/my_codex_plugin/issues/new?template=feature_request.yml) · [已有反馈](https://github.com/skyfour/my_codex_plugin/issues)
+
+请附实际安装版本和复现步骤，移除凭据、业务数据与本机路径。后续在同一 issue 跟进，详见[反馈与维护](../../docs/feedback.md)。

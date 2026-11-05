@@ -93,6 +93,9 @@ if (command === 'codex' && args[0] === 'plugin' && args[1] === 'add' && args[2].
 
 function assertSelection(result, names, { prepare = false } = {}) {
   assert.equal(result.status, 0, result.output);
+  // Value: protects=反馈入口只在实际安装成功后展示; fails_when=成功漏提示或prepare误称已安装技能; why_new=原测试只验证命令选择; seam=none; no_claim=使用隔离Codex安装替身。
+  if (prepare) assert.doesNotMatch(result.output, /已包含所选插件的反馈技能/);
+  else assert.match(result.output, /已包含所选插件的反馈技能/);
   assert.deepEqual(result.calls.filter(call => call.command === 'npm' && call.args[0] === 'ci').map(call => basename(call.cwd)), names);
   const additions = result.calls.filter(call => call.command === 'codex' && call.args[0] === 'plugin' && call.args[1] === 'add');
   assert.deepEqual(additions.map(call => call.args[2]), prepare ? [] : names.map(name => `${name}@my-codex-plugins`));
@@ -197,5 +200,6 @@ test('DBX 预热失败使安装失败，不注册任何所选插件或报告安�
   assert.equal(result.calls.some(call => call.command === 'codex' && ['marketplace', 'add'].includes(call.args[1])), false, result.output);
   assert.equal(result.calls.some(call => call.command === 'provider'), false, result.output);
   assert.doesNotMatch(result.output, /安装完成/);
+  assert.doesNotMatch(result.output, /已包含所选插件的反馈技能/);
   assert.match(result.output, /DBX setup fixture: failed/);
 });

@@ -11,9 +11,11 @@
 
 ## Testing
 
+- 反馈技能或维护者分诊技能变更时，执行离线模型评测：`node scripts/feedback-eval.mjs --input` 生成全部六个场景，在新的 Codex 子代理中只提供该输出，让模型按附带技能返回 JSON，再用 `node scripts/feedback-eval.mjs --results <输出文件>` 校验。六个场景覆盖四插件版本、诊断不发布、无连接降级、结果不明不重试、成功链接、去重、隐私与只读分诊。此评测不访问 GitHub，也不证明真实提交、分配或邮件投递；这些在发布后单独核验。
+
 - `npm run prepare:plugins`：仅用于开发，明确准备三个 Node 插件的锁定依赖、构建 API 界面并验证 MCP，不注册插件。新增插件不自动加入此范围。
 - `npm test`：验证市场结构、版本与全部现有 Node 测试。
-- `npm run check`：API Client 的真实 stdio MCP 连接及内联 UI 检查。
+- `npm run check`：API Client、本地代码审查和 DBX 的真实 stdio MCP 连接及内联 UI 检查；DBX 检查不启动 Docker。
 - API 浏览器测试：在 `plugins/codex-api-client` 执行 `npm exec playwright -- test --config playwright.tree.config.ts`，需要 Chrome。
 - `npm run test:ui`：构建当前 API 源码并测试三个插件的完整浏览器套件。新增控件审计拒绝空定位器、指针遮挡以及只有程序滚动隐藏父容器才能到达的控件；截图/JSON 默认在 `/tmp/codex-plugin-ui-audit`，可设置 `UI_AUDIT_DIR`。
 - 安装流程验证使用独立临时 `CODEX_HOME`，避免覆盖用户现有插件配置。
