@@ -22,6 +22,7 @@ import './style.css';
 type Doc={kind:string,id:string,revision:number,data:any};
 type Tab={key:string,doc:Doc,itemId?:string,dirty:boolean};
 type DropPosition='before'|'after'|'inside';
+type TreeChange='tree'|'request-drag';
 const requestDragType='application/x-codex-api-request';
 type State={collections:Doc[],environments:Doc[],globals:Doc|null,settings:Doc|null,cookies:Doc|null,history:any[],defaults:any};
 const empty:State={collections:[],environments:[],globals:null,settings:null,cookies:null,history:[],defaults:{}};
@@ -53,7 +54,7 @@ function App(){
   const tab=tabs.find(t=>t.key===active),node=nodeOf(tab),request=node?.request;
   const result=results[active]||null;
   const setResult=(value:any,key=active)=>setResults(all=>({...all,[key]:value}));
-  const structureBusy=useRef(false),[changingStructure,setChangingStructure]=useState(false);
+  const structureBusy=useRef<TreeChange|null>(null),[changingStructure,setChangingStructure]=useState(false);
   const draggedRequest=useRef<{collectionId:string,itemId:string}|null>(null);
   const [dropIndicator,setDropIndicator]=useState<{key:string,position:DropPosition}|null>(null);
   const saves=useRef(new Map<string,Promise<Doc|undefined>>());
@@ -115,7 +116,8 @@ function App(){
     activateTab({key,doc,itemId,dirty:false});
   }
   function edit(patch:(draft:any)=>void){
-    if(!tab||structureBusy.current)return;
+    // Request drags rebase late edits, including completed uploads, onto the moved tree.
+    if(!tab||structureBusy.current==='tree')return;
     setTabs(all=>{const current=all.find(t=>t.key===tab.key);if(!current)return all;const doc=clone(current.doc),node=nodeOf({...current,doc});if(!node)return all;patch(node);return all.map(t=>t.doc.kind===doc.kind&&t.doc.id===doc.id?{...t,doc,dirty:true}:t);});
   }
   async function save(current=tab):Promise<Doc|undefined>{
@@ -136,7 +138,7 @@ function App(){
   async function reloadCurrent(){if(!tab)return;const fresh=await call<Doc>('api_document_get',{kind:tab.doc.kind,id:tab.doc.id});setTabs(all=>all.filter(t=>t.doc.id!==fresh.id||t.doc.kind!==fresh.kind||!t.itemId||findItem(fresh.data,t.itemId)).map(t=>t.doc.id===fresh.id&&t.doc.kind===fresh.kind?{...t,doc:fresh,dirty:false}:t));setError('');}
   async function newCollection(){setCollectionSearch('');const doc=await call<Doc>('api_document_put',{kind:'collection',revision:0,data:{info:{name:'新集合'},item:[]}});await refresh();open(doc);}
   async function newEnvironment(){const doc=await call<Doc>('api_document_put',{kind:'environment',revision:0,data:{name:'新环境',values:[]}});await refresh();setEnvironment(doc.id);open(doc);}
-  async function changeTree(action:()=>Promise<void>){if(structureBusy.current)return;structureBusy.current=true;setChangingStructure(true);try{await action();}finally{structureBusy.current=false;setChangingStructure(false);}}
+  async function changeTree(action:()=>Promise<void>,type:TreeChange='tree'){if(structureBusy.current)return;structureBusy.current=type;setChangingStructure(true);try{await action();}finally{structureBusy.current=null;setChangingStructure(false);}}
   async function newItem(folder=false,target=tab){return changeTree(async()=>{
     setCollectionSearch('');
     let doc:Doc|undefined;if(target?.doc.kind==='collection')doc=await save(target);else doc=state.collections[0];
@@ -177,7 +179,7 @@ function App(){
       });
       if(placement==='inside'&&targetId)setCollapsed(v=>({...v,[doc.id+':'+targetId]:false}));
       await refresh();setNotice('已移动');
-    });
+    },'request-drag');
   }
   async function removeDoc(target=tab){if(!target)return;target=targetOf(target.doc,target.itemId);await call('api_document_delete',{kind:target.doc.kind,id:target.doc.id,revision:target.doc.revision});setTabs(all=>all.filter(t=>t.doc.id!==target.doc.id||t.doc.kind!==target.doc.kind));if(latest.current.tab?.doc.id===target.doc.id)setActive('');await refresh();}
   async function copyCollection(target=tab){if(!target)return;const doc=await save(target);if(!doc)return;const copied=await call<Doc>('api_document_duplicate',{kind:'collection',id:doc.id});await refresh();setModal('');open(copied);}

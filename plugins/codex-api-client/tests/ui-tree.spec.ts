@@ -113,3 +113,49 @@ test('cancelled and cross-collection drags leave the collection and draft unchan
   await expect(page.getByLabel('URL',{exact:true})).toHaveValue('http://127.0.0.1:47892/keep-draft');
   await expect(page.getByText('未保存',{exact:true})).toBeVisible();
 });
+
+test('an attachment uploaded during a request drag stays in the draft',async({page})=>{
+  const {doc,tree}=await setup(page);
+  const row=(name:string)=>tree.locator('.tree-row').filter({has:page.getByRole('button',{name,exact:true})});
+  await page.getByRole('button',{name:'请求体',exact:true}).click();
+  await page.getByLabel('请求体类型').selectOption('file');
+
+  async function pauseApi(name:string){
+    const started=Promise.withResolvers<void>(),resume=Promise.withResolvers<void>();
+    await page.route('**/api/'+name,async route=>{
+      started.resolve();
+      await resume.promise;
+      await route.continue();
+    });
+    return {started:started.promise,release:resume.resolve};
+  }
+  const [pausedUpload,pausedMove]=await Promise.all([pauseApi('api_file_upload'),pauseApi('api_item_edit')]);
+
+  const filename='drag-attachment.bin';
+  const attachment=page.locator('.file-picker.large').filter({hasText:filename});
+  let uploadedPath:string,attachedDuringMove:boolean;
+  try{
+    await page.getByLabel('二进制文件',{exact:true}).setInputFiles({name:filename,mimeType:'application/octet-stream',buffer:Buffer.from('synthetic attachment')});
+    await pausedUpload.started;
+    await dragOver(page,row('用户列表'),row('账户'));
+    await page.mouse.up();
+    await pausedMove.started;
+    const response=page.waitForResponse('**/api/api_file_upload');
+    pausedUpload.release();
+    ({path:uploadedPath}=await (await response).json());
+    attachedDuringMove=await attachment.waitFor({state:'visible',timeout:5000}).then(()=>true,()=>false);
+  }finally{
+    pausedUpload.release();
+    pausedMove.release();
+    await page.unrouteAll({behavior:'wait'});
+  }
+
+  const getCollection=()=>api(page,'api_document_get',{kind:'collection',id:doc.id});
+  await expect(page.getByText('已移动',{exact:true})).toBeVisible();
+  expect(attachedDuringMove,'attachment is visible while the move is pending').toBe(true);
+  await expect(attachment).toBeVisible();
+  await expect(page.getByText('未保存',{exact:true})).toBeVisible();
+  expect((await getCollection()).data.item[0].item[0].request.body?.file?.src).toBeUndefined();
+  await page.getByRole('button',{name:'保存',exact:true}).click();
+  await expect.poll(async()=>(await getCollection()).data.item[0].item[0].request.body.file.src).toBe(uploadedPath);
+});
