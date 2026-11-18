@@ -16,11 +16,14 @@ import {SettingsPanel} from './SettingsPanel';
 import {BrandIcon} from './BrandIcon';
 import {EnvironmentPicker} from './EnvironmentPicker';
 import {AuthEditor,Rows,Modal,type Row} from './components';
-import {findItem,compatibilityMode} from '../src/collections.mjs';
+import {findItem,moveItem,compatibilityMode} from '../src/collections.mjs';
 import './style.css';
 
 type Doc={kind:string,id:string,revision:number,data:any};
 type Tab={key:string,doc:Doc,itemId?:string,dirty:boolean};
+type DropPosition='before'|'after'|'inside';
+type TreeChange='tree'|'request-drag';
+const requestDragType='application/x-codex-api-request';
 type State={collections:Doc[],environments:Doc[],globals:Doc|null,settings:Doc|null,cookies:Doc|null,history:any[],defaults:any};
 const empty:State={collections:[],environments:[],globals:null,settings:null,cookies:null,history:[],defaults:{}};
 const uid=()=>crypto.randomUUID();
@@ -51,7 +54,9 @@ function App(){
   const tab=tabs.find(t=>t.key===active),node=nodeOf(tab),request=node?.request;
   const result=results[active]||null;
   const setResult=(value:any,key=active)=>setResults(all=>({...all,[key]:value}));
-  const structureBusy=useRef(false),[changingStructure,setChangingStructure]=useState(false);
+  const structureBusy=useRef<TreeChange|null>(null),[changingStructure,setChangingStructure]=useState(false);
+  const draggedRequest=useRef<{collectionId:string,itemId:string}|null>(null);
+  const [dropIndicator,setDropIndicator]=useState<{key:string,position:DropPosition}|null>(null);
   const saves=useRef(new Map<string,Promise<Doc|undefined>>());
   const [menu,setMenu]=useState<{target:Tab,x:number,y:number}|null>(null),[actionTarget,setActionTarget]=useState<Tab>(),[rename,setRename]=useState('');
   const dialogTarget=actionTarget||tab;
@@ -96,7 +101,7 @@ function App(){
   useEffect(()=>{if(ready)localStorage.setItem('api-environment',environment);},[environment,ready]);
   useEffect(()=>{if(ready&&environment&&!state.environments.some(e=>e.id===environment))setEnvironment('');},[ready,state.environments,environment]);
   useEffect(()=>{const before=(e:BeforeUnloadEvent)=>{if(latest.current.tabs.some(t=>t.dirty)){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',before);return()=>window.removeEventListener('beforeunload',before);},[]);
-  useEffect(()=>{const key=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();if(!document.querySelector('[role=dialog]'))safe(()=>save(latest.current.tab));}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[]);
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();if(!structureBusy.current&&!document.querySelector('[role=dialog]'))safe(()=>save(latest.current.tab));}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[]);
   const runningIds=Object.entries(results).filter(([,r])=>r.status==='running').map(([key,r])=>[key,r.id]);
   useEffect(()=>{
     if(!runningIds.length)return;
@@ -111,7 +116,8 @@ function App(){
     activateTab({key,doc,itemId,dirty:false});
   }
   function edit(patch:(draft:any)=>void){
-    if(!tab||structureBusy.current)return;
+    // Request drags rebase late edits, including completed uploads, onto the moved tree.
+    if(!tab||structureBusy.current==='tree')return;
     setTabs(all=>{const current=all.find(t=>t.key===tab.key);if(!current)return all;const doc=clone(current.doc),node=nodeOf({...current,doc});if(!node)return all;patch(node);return all.map(t=>t.doc.kind===doc.kind&&t.doc.id===doc.id?{...t,doc,dirty:true}:t);});
   }
   async function save(current=tab):Promise<Doc|undefined>{
@@ -132,7 +138,7 @@ function App(){
   async function reloadCurrent(){if(!tab)return;const fresh=await call<Doc>('api_document_get',{kind:tab.doc.kind,id:tab.doc.id});setTabs(all=>all.filter(t=>t.doc.id!==fresh.id||t.doc.kind!==fresh.kind||!t.itemId||findItem(fresh.data,t.itemId)).map(t=>t.doc.id===fresh.id&&t.doc.kind===fresh.kind?{...t,doc:fresh,dirty:false}:t));setError('');}
   async function newCollection(){setCollectionSearch('');const doc=await call<Doc>('api_document_put',{kind:'collection',revision:0,data:{info:{name:'新集合'},item:[]}});await refresh();open(doc);}
   async function newEnvironment(){const doc=await call<Doc>('api_document_put',{kind:'environment',revision:0,data:{name:'新环境',values:[]}});await refresh();setEnvironment(doc.id);open(doc);}
-  async function changeTree(action:()=>Promise<void>){if(structureBusy.current)return;structureBusy.current=true;setChangingStructure(true);try{await action();}finally{structureBusy.current=false;setChangingStructure(false);}}
+  async function changeTree(action:()=>Promise<void>,type:TreeChange='tree'){if(structureBusy.current)return;structureBusy.current=type;setChangingStructure(true);try{await action();}finally{structureBusy.current=null;setChangingStructure(false);}}
   async function newItem(folder=false,target=tab){return changeTree(async()=>{
     setCollectionSearch('');
     let doc:Doc|undefined;if(target?.doc.kind==='collection')doc=await save(target);else doc=state.collections[0];
@@ -151,11 +157,35 @@ function App(){
     setTabs(all=>all.filter(t=>operation!=='delete'||t.doc.id!==saved.id||!t.itemId||findItem(saved.data,t.itemId)).map(t=>t.doc.id===saved.id&&!t.dirty?{...t,doc:clone(saved)}:t));await refresh();setModal('');
     if(operation==='delete'){if(latest.current.tab?.doc.id===saved.id&&latest.current.tab.itemId&&!findItem(saved.data,latest.current.tab.itemId))setActive('');}else setNotice(operation==='duplicate'?'已复制，可在左侧打开副本':'已移动');
   });}
+  async function moveDroppedRequest(doc:Doc,itemId:string,targetId:string|undefined,placement:DropPosition){
+    return changeTree(async()=>{
+      const pending=saves.current.get('collection:'+doc.id);
+      const base=(pending&&await pending)||targetOf(doc,itemId).doc;
+      const source=findItem(base.data,itemId),target=targetId?findItem(base.data,targetId):null;
+      if(!source?.item.request||(targetId&&!target))return;
+      const parent=placement==='inside'?(target?.item||base.data):target!.parent;
+      if(!Array.isArray(parent.item))return;
+      const parentId=parent===base.data?undefined:parent.id;
+      let position=placement==='inside'?parent.item.length:target!.index+(placement==='after'?1:0);
+      if(source.parent===parent&&source.index<position)position--;
+      if(source.parent===parent&&source.index===position)return;
+
+      const saved=await call<Doc>('api_item_edit',{collectionId:doc.id,itemId,operation:'move',revision:base.revision,parentId,position});
+      setTabs(all=>{
+        const sameCollection=(t:Tab)=>t.doc.kind==='collection'&&t.doc.id===saved.id;
+        const draft=all.find(t=>sameCollection(t)&&t.dirty);
+        const draftDoc=draft&&{...draft.doc,revision:saved.revision,data:moveItem(draft.doc.data,itemId,parentId,position)};
+        return all.map(t=>sameCollection(t)?{...t,doc:t.dirty&&draftDoc?draftDoc:saved}:t);
+      });
+      if(placement==='inside'&&targetId)setCollapsed(v=>({...v,[doc.id+':'+targetId]:false}));
+      await refresh();setNotice('已移动');
+    },'request-drag');
+  }
   async function removeDoc(target=tab){if(!target)return;target=targetOf(target.doc,target.itemId);await call('api_document_delete',{kind:target.doc.kind,id:target.doc.id,revision:target.doc.revision});setTabs(all=>all.filter(t=>t.doc.id!==target.doc.id||t.doc.kind!==target.doc.kind));if(latest.current.tab?.doc.id===target.doc.id)setActive('');await refresh();}
   async function copyCollection(target=tab){if(!target)return;const doc=await save(target);if(!doc)return;const copied=await call<Doc>('api_document_duplicate',{kind:'collection',id:doc.id});await refresh();setModal('');open(copied);}
   async function renameTarget(){const target=dialogTarget;if(!target||!rename.trim())return;await changeTree(async()=>{const doc=await save(target);if(!doc)return;const data=clone(doc.data),n=target.itemId?findItem(data,target.itemId)?.item:data;if(!n)throw Error('该项目已被删除，请刷新工作区');if(n.info)n.info.name=rename.trim();else n.name=rename.trim();const saved=await call<Doc>('api_document_put',{kind:doc.kind,id:doc.id,revision:doc.revision,data});setTabs(all=>all.map(t=>t.doc.id===doc.id?{...t,doc:saved,dirty:false}:t));await refresh();setModal('');});}
   async function start(collectionRun=false,target=tab){
-    if(!target||target.doc.kind!=='collection'||startLock.current||results[target.key]?.status==='running')return;
+    if(structureBusy.current||!target||target.doc.kind!=='collection'||startLock.current||results[target.key]?.status==='running')return;
     startLock.current=true;setBusy(true);try{
       const saved=await save(target);if(!saved)return;
       const args:any={collectionId:saved.id,environmentId:environment||undefined,itemId:target.itemId};
@@ -215,7 +245,66 @@ function App(){
   const treeQuery=collectionSearch.trim().toLocaleLowerCase();
   const matchesTree=(item:any):boolean=>!treeQuery||String(item.name||item.info?.name||'').toLocaleLowerCase().includes(treeQuery)||rawSearch(item).includes(treeQuery)||(item.item||[]).some(matchesTree);
   const rawSearch=(item:any)=>item.request?(item.request.method+' '+rawUrl(item.request)).toLocaleLowerCase():'';
-  function renderTree(doc:Doc,items:any[],depth=0,showAll=false):React.ReactNode{return items.filter(item=>showAll||matchesTree(item)).map(item=>{const key=doc.id+':'+item.id;return <React.Fragment key={item.id}><div onContextMenu={e=>rowMenu(e,doc,item.id)} className={'tree-row '+(active===`collection:${doc.id}:${item.id}`?'selected':'')} style={{paddingLeft:12+depth*16}}>{item.item?<><button className="tree-toggle" aria-label={(collapsed[key]?'展开 ':'收起 ')+item.name} aria-expanded={!collapsed[key]} onClick={()=>toggle(key)}><TreeIcon name={collapsed[key]?'right':'down'}/></button><TreeIcon name="folder"/></>:<span className={'tree-symbol '+(item.request?.method||'GET').toLowerCase()}>{item.request?.method||'GET'}</span>}<button className="tree-name" title={item.name} onClick={()=>{if(item.item)toggle(key);open(doc,item.id);}}>{item.name}</button>{menuButton(doc,item.id)}</div>{item.item&&(treeQuery||!collapsed[key])&&renderTree(doc,item.item,depth+1,showAll||String(item.name).toLocaleLowerCase().includes(treeQuery))}</React.Fragment>;});}
+  function endRequestDrag(){
+    draggedRequest.current=null;
+    setDropIndicator(null);
+  }
+  function treeDropProps(doc:Doc,item?:any){
+    const key=JSON.stringify([doc.id,item?.id]);
+    function dropPosition(e:React.DragEvent<HTMLDivElement>):DropPosition|undefined{
+      const source=draggedRequest.current;
+      if(structureBusy.current||source?.collectionId!==doc.id||source.itemId===item?.id||!e.dataTransfer.types.includes(requestDragType))return;
+      if(!item)return 'inside';
+      const bounds=e.currentTarget.getBoundingClientRect();
+      const offset=(e.clientY-bounds.top)/bounds.height;
+      if(item.item&&offset>=0.25&&offset<=0.75)return 'inside';
+      return offset<0.5?'before':'after';
+    }
+    return {
+      'data-drop-position':dropIndicator?.key===key?dropIndicator.position:undefined,
+      onDragOver(e:React.DragEvent<HTMLDivElement>){
+        const position=dropPosition(e);
+        if(!position)return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect='move';
+        setDropIndicator(v=>v?.key===key&&v.position===position?v:{key,position});
+      },
+      onDragLeave(e:React.DragEvent<HTMLDivElement>){
+        if(e.relatedTarget instanceof Node&&e.currentTarget.contains(e.relatedTarget))return;
+        setDropIndicator(v=>v?.key===key?null:v);
+      },
+      onDrop(e:React.DragEvent<HTMLDivElement>){
+        const placement=dropPosition(e),source=draggedRequest.current;
+        endRequestDrag();
+        if(!placement||!source||e.dataTransfer.getData(requestDragType)!==source.itemId)return;
+        e.preventDefault();
+        safe(()=>moveDroppedRequest(doc,source.itemId,item?.id,placement));
+      }
+    };
+  }
+  function renderTree(doc:Doc,items:any[],depth=0,showAll=false):React.ReactNode{
+    return items.filter(item=>showAll||matchesTree(item)).map(item=>{
+      const key=doc.id+':'+item.id;
+      return <React.Fragment key={item.id}>
+        <div {...treeDropProps(doc,item)} onContextMenu={e=>rowMenu(e,doc,item.id)}
+          draggable={Boolean(item.request)&&!changingStructure}
+          onDragStart={e=>{
+            if(!item.request||structureBusy.current){e.preventDefault();return;}
+            draggedRequest.current={collectionId:doc.id,itemId:item.id};
+            e.dataTransfer.setData(requestDragType,item.id);
+            e.dataTransfer.effectAllowed='move';
+            setMenu(null);
+          }}
+          onDragEnd={endRequestDrag}
+          className={'tree-row '+(active===`collection:${doc.id}:${item.id}`?'selected':'')} style={{paddingLeft:12+depth*16}}>
+          {item.item?<><button className="tree-toggle" aria-label={(collapsed[key]?'展开 ':'收起 ')+item.name} aria-expanded={!collapsed[key]} onClick={()=>toggle(key)}><TreeIcon name={collapsed[key]?'right':'down'}/></button><TreeIcon name="folder"/></>:<span className={'tree-symbol '+(item.request?.method||'GET').toLowerCase()}>{item.request?.method||'GET'}</span>}
+          <button className="tree-name" title={item.name} onClick={()=>{if(item.item)toggle(key);open(doc,item.id);}}>{item.name}</button>
+          {menuButton(doc,item.id)}
+        </div>
+        {item.item&&(treeQuery||!collapsed[key])&&renderTree(doc,item.item,depth+1,showAll||String(item.name).toLocaleLowerCase().includes(treeQuery))}
+      </React.Fragment>;
+    });
+  }
   function chooseTree(action:string,target:Tab){setMenu(null);setActionTarget(target);if(action==='open')open(target.doc,target.itemId);else if(action==='request'||action==='folder')safe(()=>newItem(action==='folder',target));else if(action==='rename'){setRename(titleOf(target));setModal('rename');}else if(action==='duplicate')safe(()=>target.itemId?treeAction('duplicate',target):copyCollection(target));else if(action==='move'){setMoveTarget('');setMovePosition(0);setModal('move');}else if(action==='run'){if(nodeOf(target)?.request)safe(()=>start(false,target));else setModal('runner');}else if(action==='export')safe(()=>exportCurrent(nodeOf(target)?.request?'curl':'postman',target));else if(action==='delete')ask('确认删除 '+titleOf(target)+'？'+(nodeOf(target)?.item?'其中的文件夹和请求也将删除。':''),()=>safe(()=>target.itemId?treeAction('delete',target):removeDoc(target)));}
   const selectedResponse=result?.responses?.[responseIndex]||result?.responses?.at(-1);
 
@@ -236,13 +325,16 @@ function App(){
     <div className={"workspace"+(sidebarOpen?"":" sidebar-hidden")} style={{gridTemplateColumns:`${sidebar}px 5px 1fr`}}>
       <aside className="sidebar" hidden={!sidebarOpen}><div className="workspace-title"><span>我的工作区</span><button aria-label="刷新工作区" onClick={()=>safe(refresh)}>↻</button></div><div className="side-nav">{[['collections','集合'],['history','历史']].map(([key,label])=><button key={key} className={section===key?'active':''} onClick={()=>setSection(key)}>{label}</button>)}</div>
       <div className="side-tools">{section==='collections'?<><button onClick={()=>safe(newCollection)}>＋ 新建集合</button><button onClick={()=>{setImportWarnings([]);setImportFiles({});setModal('import');}}>导入</button><button onClick={()=>setModal('export-workspace')}>导出全部</button><button onClick={()=>setModal('backup')}>完整备份与恢复</button></>:<span className="muted">最近 100 次运行</span>}</div>
-      <div className="collection-search"><input ref={collectionSearchInput} aria-label="搜索集合和请求" placeholder="搜索名称、URL…" value={collectionSearch} onChange={e=>setCollectionSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){setCollectionSearch('');e.currentTarget.blur();}}}/>{collectionSearch&&<button aria-label="清空集合搜索" onClick={()=>{setCollectionSearch('');collectionSearchInput.current?.focus();}}>×</button>}</div><div className="side-scroll">{section==='collections'&&<>{!state.collections.length&&<div className="side-empty">创建一个集合，<br/>开始整理你的 API。</div>}{state.collections.filter(doc=>matchesTree(doc.data)).map(doc=><div className="collection" key={doc.id}><div onContextMenu={e=>rowMenu(e,doc)} className={'collection-head '+(active===`collection:${doc.id}:root`?'selected':'')}><button className="tree-toggle" aria-label={(collapsed[doc.id]?'展开 ':'收起 ')+doc.data.info.name} aria-expanded={!collapsed[doc.id]} onClick={()=>toggle(doc.id)}><TreeIcon name={collapsed[doc.id]?'right':'down'}/></button><TreeIcon name="collection"/><button className="tree-name" onClick={()=>{toggle(doc.id);open(doc);}}>{doc.data.info.name}</button><small>{countRequests(doc.data)}</small>{menuButton(doc)}</div>{(treeQuery||!collapsed[doc.id])&&renderTree(doc,doc.data.item,0,doc.data.info.name.toLocaleLowerCase().includes(treeQuery))}</div>)}</>}
+      <div className="collection-search"><input ref={collectionSearchInput} aria-label="搜索集合和请求" placeholder="搜索名称、URL…" value={collectionSearch} onChange={e=>setCollectionSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){setCollectionSearch('');e.currentTarget.blur();}}}/>{collectionSearch&&<button aria-label="清空集合搜索" onClick={()=>{setCollectionSearch('');collectionSearchInput.current?.focus();}}>×</button>}</div><div className="side-scroll">{section==='collections'&&<>{!state.collections.length&&<div className="side-empty">创建一个集合，<br/>开始整理你的 API。</div>}{state.collections.filter(doc=>matchesTree(doc.data)).map(doc=><div className="collection" key={doc.id}><div {...treeDropProps(doc)} onContextMenu={e=>rowMenu(e,doc)} className={'collection-head '+(active===`collection:${doc.id}:root`?'selected':'')}><button className="tree-toggle" aria-label={(collapsed[doc.id]?'展开 ':'收起 ')+doc.data.info.name} aria-expanded={!collapsed[doc.id]} onClick={()=>toggle(doc.id)}><TreeIcon name={collapsed[doc.id]?'right':'down'}/></button><TreeIcon name="collection"/><button className="tree-name" onClick={()=>{toggle(doc.id);open(doc);}}>{doc.data.info.name}</button><small>{countRequests(doc.data)}</small>{menuButton(doc)}</div>{(treeQuery||!collapsed[doc.id])&&renderTree(doc,doc.data.item,0,doc.data.info.name.toLocaleLowerCase().includes(treeQuery))}</div>)}</>}
       {section==='collections'&&treeQuery&&!state.collections.some(doc=>matchesTree(doc.data))&&<div className="side-empty">没有匹配的集合或请求</div>}{section==='history'&&state.history.filter(h=>!treeQuery||h.name.toLocaleLowerCase().includes(treeQuery)).map(h=><button className="history-row" key={h.id} onClick={()=>safe(async()=>{const value=await call('api_run_result',{runId:h.id,includeBodies:true});setResponseIndex(0);const doc=state.collections.find(c=>c.id===value.collectionId);if(doc){const itemId=value.itemId&&findItem(doc.data,value.itemId)?value.itemId:undefined;setResult(value,`collection:${doc.id}:${itemId||'root'}`);open(doc,itemId);}else{setResult(value);setModal('history');}})}><span className={'run-dot '+h.status}/><span><b>{h.name}</b><small>{new Date(h.createdAt).toLocaleString('zh-CN')} · {h.responses} 个响应</small></span><small>{h.failed?'失败 '+h.failed:h.status==='running'?'运行中':'查看'}</small></button>)}
       </div><footer className="sidebar-footer"><i/>数据保存在本机<span>v0.3</span></footer></aside>
       <div className="vertical-handle" hidden={!sidebarOpen} role="separator" aria-label="调整侧栏宽度" onPointerDown={e=>resize(e,'sidebar')}/>
       <main className="main"><div className="request-tabs">{tabs.map(t=><div key={t.key} className={'request-tab '+(t.key===active?'active':'')}><button onClick={()=>{activateTab(t);}}><span className="tab-method">{nodeOf(t)?.request?.method||'◈'}</span>{titleOf(t)}{t.dirty&&<span className="dirty-dot"/>}</button><button aria-label={'关闭 '+titleOf(t)} onClick={()=>{const close=()=>{setTabs(all=>all.filter(v=>v.key!==t.key));if(active===t.key){const next=tabs.find(v=>v.key!==t.key);activateTab(next);}};t.dirty?ask('此集合或环境有未保存修改。关闭最后一个相关标签会丢失修改；其他相关标签仍会保留草稿。',close):close();}}>×</button></div>)}<button className="add-tab" aria-label="新建请求标签" onClick={()=>safe(()=>newItem())}>＋</button></div>
       {(error||notice)&&<div className={'message '+(error?'error':'success')} role={error?'alert':'status'}><span>{error||notice}</span>{error.includes('CONFLICT')&&<button onClick={()=>ask('重新加载会丢弃此集合或环境所有标签的未保存修改。',()=>safe(reloadCurrent))}>重新加载当前内容</button>}<button aria-label="关闭提示" onClick={()=>{setError('');setNotice('');}}>×</button></div>}
-      {tabs.filter(t=>nodeOf(t)?.request?.['x-codex-api-client']?.protocol).map(t=><ProtocolClient key={t.key} visible={t.key===active} request={nodeOf(t).request} collectionId={t.doc.id} itemId={t.itemId!} environmentId={environment} onSave={()=>save(latest.current.tabs.find(v=>v.key===t.key))} onChange={patch=>edit(n=>patch(n.request))}/>)}
+      {tabs.filter(t=>nodeOf(t)?.request?.['x-codex-api-client']?.protocol).map(t=><ProtocolClient key={t.key} visible={t.key===active} request={nodeOf(t).request} collectionId={t.doc.id} itemId={t.itemId!} environmentId={environment} onSave={async()=>{
+        if(structureBusy.current)throw Error('集合正在更新，请稍后重试');
+        return save(latest.current.tabs.find(v=>v.key===t.key));
+      }} onChange={patch=>edit(n=>patch(n.request))}/>)}
       {tab&&!protocol?<div className="editor-workspace" inert={changingStructure} aria-busy={changingStructure}>
         <div className="editor-top"><div className="breadcrumb">{tab.doc.kind==='collection'?'集合':tab.doc.kind==='globals'?'全局变量':'环境'}<span>/</span>{titleOf(tab)}{tab.dirty&&<small>未保存</small>}</div></div>
         <div className={"panes "+(!showResponse?"document-panes":"")}><section className="request-pane" style={{height:showResponse?split+'%':'100%'}}>

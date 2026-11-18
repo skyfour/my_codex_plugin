@@ -1,6 +1,6 @@
-import {test,expect,type Page} from '@playwright/test';
+import {test,expect,type Page,type Locator,type Request} from '@playwright/test';
 async function api(page:Page,name:string,args:any={}){return page.evaluate(async({name,args})=>{const r=await fetch('/api/'+name,{method:'POST',headers:{'Content-Type':'application/json','X-API-Token':(window as any).__DEV_TOKEN__},body:JSON.stringify(args)});const v=await r.json();if(!r.ok)throw Error(JSON.stringify(v));return v;},{name,args});}
-async function setup(page:Page){await page.goto('http://127.0.0.1:47891');const name='菜单-'+test.info().testId;const {document:doc}=await api(page,'api_import',{text:JSON.stringify({info:{name},item:[{name:'账户',item:[{name:'登录',request:{method:'POST',url:'http://127.0.0.1:47892/login'}}]},{name:'用户列表',request:{method:'GET',url:'http://127.0.0.1:47892/users'}}]})});await page.getByLabel('刷新工作区').click();const tree=page.locator('.collection').filter({has:page.locator('.collection-head').getByRole('button',{name,exact:true})});await tree.getByRole('button',{name:'登录',exact:true}).click();await page.getByLabel('URL',{exact:true}).fill('http://127.0.0.1:47892/keep-draft');return {doc,tree};}
+async function setup(page:Page){await page.goto('http://127.0.0.1:47891');const name='菜单-'+test.info().testId;const {document:doc}=await api(page,'api_import',{text:JSON.stringify({info:{name},item:[{name:'账户',item:[{name:'登录',request:{method:'POST',url:'http://127.0.0.1:47892/login'}}]},{name:'用户列表',request:{method:'GET',url:'http://127.0.0.1:47892/users'},event:[{listen:'prerequest',script:{type:'text/javascript',exec:['// request fixture']}}]}]})});await page.getByLabel('刷新工作区').click();const tree=page.locator('.collection').filter({has:page.locator('.collection-head').getByRole('button',{name,exact:true})});await tree.getByRole('button',{name:'登录',exact:true}).click();await page.getByLabel('URL',{exact:true}).fill('http://127.0.0.1:47892/keep-draft');return {doc,tree};}
 async function menu(page:Page,tree:ReturnType<Page['locator']>,name:string,action:string){await tree.getByLabel('操作 '+name,{exact:true}).click();await page.getByRole('menuitem',{name:action,exact:true}).click();}
 
 test('row menus rename duplicate move and delete the clicked request while preserving sibling draft',async({page})=>{const {doc,tree}=await setup(page);await menu(page,tree,'用户列表','重命名');await page.getByLabel('新名称').fill('成员列表');await page.getByRole('button',{name:'保存名称'}).click();await expect(page.getByLabel('URL',{exact:true})).toHaveValue('http://127.0.0.1:47892/keep-draft');await expect(tree.getByRole('button',{name:'成员列表',exact:true})).toBeVisible();await menu(page,tree,'成员列表','复制');await expect(tree.getByRole('button',{name:'成员列表 副本',exact:true})).toBeVisible();await menu(page,tree,'成员列表 副本','移动或排序');await page.getByLabel('目标文件夹').selectOption({label:'账户'});await page.getByRole('button',{name:'确认移动'}).click();await menu(page,tree,'成员列表','删除');await expect(page.getByRole('dialog',{name:'确认操作'})).toContainText('成员列表');await page.getByRole('dialog',{name:'确认操作'}).getByRole('button',{name:'确认',exact:true}).click();await expect(tree.getByRole('button',{name:'成员列表',exact:true})).toHaveCount(0);await expect(page.getByLabel('URL',{exact:true})).toHaveValue('http://127.0.0.1:47892/keep-draft');const stored=await api(page,'api_document_get',{kind:'collection',id:doc.id});expect(stored.data.item).toHaveLength(1);expect(stored.data.item[0].item.map((i:any)=>i.name)).toEqual(['成员列表 副本','登录']);expect(stored.data.item[0].item[1].request.url).toContain('keep-draft');});
@@ -16,3 +16,146 @@ test('operations on another collection preserve the active unsaved collection',a
 test('request row send opens only its result and folder row delete closes descendants',async({page})=>{const {tree}=await setup(page);await menu(page,tree,'用户列表','发送请求');await expect(page.getByLabel('名称',{exact:true})).toHaveValue('用户列表');await expect(page.getByText('运行完成',{exact:true})).toBeVisible({timeout:15000});await expect(page.getByTestId('response-body')).toContainText('/users');await tree.getByRole('button',{name:'登录',exact:true}).click();await menu(page,tree,'账户','删除');await expect(page.getByRole('dialog',{name:'确认操作'})).toContainText('文件夹和请求也将删除');await page.getByRole('dialog',{name:'确认操作'}).getByRole('button',{name:'确认',exact:true}).click();await expect(page.getByRole('button',{name:'关闭 登录',exact:true})).toHaveCount(0);await expect(tree.getByRole('button',{name:'账户',exact:true})).toHaveCount(0);await tree.getByRole('button',{name:'用户列表',exact:true}).click();await expect(page.getByTestId('response-body')).toContainText('/users');});
 
 test('collection delete uses current local revision after save with menu open',async({page})=>{const {doc,tree}=await setup(page);await tree.getByLabel('操作 '+doc.data.info.name,{exact:true}).click();await page.keyboard.press(process.platform==='darwin'?'Meta+s':'Control+s');await expect(page.getByText('已保存',{exact:true})).toBeVisible();await page.getByRole('menuitem',{name:'删除',exact:true}).click();await page.getByRole('dialog',{name:'确认操作'}).getByRole('button',{name:'确认',exact:true}).click();await expect(tree).toHaveCount(0);await expect(page.getByRole('alert')).toHaveCount(0);await expect(page.getByRole('button',{name:'关闭 登录',exact:true})).toHaveCount(0);});
+
+async function dragOver(page:Page, source:Locator, target:Locator, verticalPosition=0.5){
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+  const from=(await source.boundingBox())!, to=(await target.boundingBox())!;
+  const x=to.x+to.width/2, y=to.y+to.height*verticalPosition;
+  await page.mouse.move(from.x+from.width/2,from.y+from.height/2);
+  await page.mouse.down();
+  await page.mouse.move(x,y,{steps:12});
+  await page.mouse.move(x+1,y);
+}
+
+test('request drag moves across folders and reorders while keeping unsaved edits',async({page})=>{
+  const {doc,tree}=await setup(page);
+  const row=(name:string)=>tree.locator('.tree-row').filter({has:page.getByRole('button',{name,exact:true})});
+  const login=row('登录'), users=row('用户列表'), folder=row('账户');
+  const names=tree.locator('.tree-row').getByRole('button',{name:/^(账户|用户列表|登录)$/});
+  const getCollection=()=>api(page,'api_document_get',{kind:'collection',id:doc.id});
+  const folderNames=async()=>(await getCollection()).data.item[0].item.map((item:any)=>item.name);
+
+  await tree.getByLabel('收起 账户',{exact:true}).click();
+  await dragOver(page,users,folder);
+  await page.mouse.up();
+  await expect.poll(folderNames).toEqual(['登录','用户列表']);
+  await expect(names).toHaveText(['账户','登录','用户列表']);
+  expect((await getCollection()).data.item[0].item[1]).toEqual(doc.data.item[1]);
+
+  await dragOver(page,users,login,0.15);
+  await expect(login).toHaveAttribute('data-drop-position','before');
+  await page.mouse.up();
+  await expect.poll(folderNames).toEqual(['用户列表','登录']);
+  await expect(names).toHaveText(['账户','用户列表','登录']);
+
+  await dragOver(page,users,login,0.85);
+  await expect(login).toHaveAttribute('data-drop-position','after');
+  await page.mouse.up();
+  await expect.poll(folderNames).toEqual(['登录','用户列表']);
+  await expect(names).toHaveText(['账户','登录','用户列表']);
+
+  let releaseMove!:()=>void, beginMove!:()=>void;
+  const gate=new Promise<void>(resolve=>{releaseMove=resolve;});
+  const started=new Promise<void>(resolve=>{beginMove=resolve;});
+  await page.route('**/api/api_item_edit',async route=>{
+    beginMove();
+    await gate;
+    await route.continue();
+  },{times:1});
+  const keyboardWrites:string[]=[];
+  const trackWrite=(request:Request)=>{
+    if(/\/api\/(api_document_put|api_run_start)$/.test(request.url()))keyboardWrites.push(request.url());
+  };
+  page.on('request',trackWrite);
+  try{
+    await dragOver(page,login,tree.locator('.collection-head'));
+    await page.mouse.up();
+    await started;
+    const modifier=process.platform==='darwin'?'Meta':'Control';
+    await page.keyboard.press(modifier+'+s');
+    await page.keyboard.press(modifier+'+Enter');
+  }finally{
+    releaseMove();
+  }
+  await expect.poll(async()=>(await getCollection()).data.item.map((item:any)=>item.name)).toEqual(['账户','登录']);
+  page.off('request',trackWrite);
+  expect(keyboardWrites).toEqual([]);
+  await expect(page.getByLabel('URL',{exact:true})).toHaveValue('http://127.0.0.1:47892/keep-draft');
+  await expect(page.getByText('未保存',{exact:true})).toBeVisible();
+  expect((await getCollection()).data.item[1].request.url).toContain('/login');
+
+  await page.getByRole('button',{name:'保存',exact:true}).click();
+  await expect.poll(async()=>(await getCollection()).data.item[1].request.url).toContain('/keep-draft');
+  await page.reload();
+  await expect(names).toHaveText(['账户','用户列表','登录']);
+});
+
+test('cancelled and cross-collection drags leave the collection and draft unchanged',async({page})=>{
+  const {doc,tree}=await setup(page);
+  const other=(await api(page,'api_import',{text:JSON.stringify({info:{name:'其他集合-'+doc.id},item:[]})})).document;
+  await page.getByLabel('刷新工作区').click();
+  const source=tree.locator('.tree-row').filter({has:page.getByRole('button',{name:'用户列表',exact:true})});
+  const folder=tree.locator('.tree-row').filter({has:page.getByRole('button',{name:'账户',exact:true})});
+  const otherHead=page.locator('.collection-head').filter({has:page.getByRole('button',{name:other.data.info.name,exact:true})});
+
+  await dragOver(page,source,folder);
+  await expect(folder).toHaveAttribute('data-drop-position','inside');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await expect(folder).not.toHaveAttribute('data-drop-position');
+  await dragOver(page,source,otherHead);
+  await page.mouse.up();
+  await expect(otherHead).not.toHaveAttribute('data-drop-position');
+
+  const stored=await api(page,'api_document_get',{kind:'collection',id:doc.id});
+  expect(stored.revision).toBe(doc.revision);
+  await expect(page.getByLabel('URL',{exact:true})).toHaveValue('http://127.0.0.1:47892/keep-draft');
+  await expect(page.getByText('未保存',{exact:true})).toBeVisible();
+});
+
+test('an attachment uploaded during a request drag stays in the draft',async({page})=>{
+  const {doc,tree}=await setup(page);
+  const row=(name:string)=>tree.locator('.tree-row').filter({has:page.getByRole('button',{name,exact:true})});
+  await page.getByRole('button',{name:'请求体',exact:true}).click();
+  await page.getByLabel('请求体类型').selectOption('file');
+
+  async function pauseApi(name:string){
+    const started=Promise.withResolvers<void>(),resume=Promise.withResolvers<void>();
+    await page.route('**/api/'+name,async route=>{
+      started.resolve();
+      await resume.promise;
+      await route.continue();
+    });
+    return {started:started.promise,release:resume.resolve};
+  }
+  const [pausedUpload,pausedMove]=await Promise.all([pauseApi('api_file_upload'),pauseApi('api_item_edit')]);
+
+  const filename='drag-attachment.bin';
+  const attachment=page.locator('.file-picker.large').filter({hasText:filename});
+  let uploadedPath:string,attachedDuringMove:boolean;
+  try{
+    await page.getByLabel('二进制文件',{exact:true}).setInputFiles({name:filename,mimeType:'application/octet-stream',buffer:Buffer.from('synthetic attachment')});
+    await pausedUpload.started;
+    await dragOver(page,row('用户列表'),row('账户'));
+    await page.mouse.up();
+    await pausedMove.started;
+    const response=page.waitForResponse('**/api/api_file_upload');
+    pausedUpload.release();
+    ({path:uploadedPath}=await (await response).json());
+    attachedDuringMove=await attachment.waitFor({state:'visible',timeout:5000}).then(()=>true,()=>false);
+  }finally{
+    pausedUpload.release();
+    pausedMove.release();
+    await page.unrouteAll({behavior:'wait'});
+  }
+
+  const getCollection=()=>api(page,'api_document_get',{kind:'collection',id:doc.id});
+  await expect(page.getByText('已移动',{exact:true})).toBeVisible();
+  expect(attachedDuringMove,'attachment is visible while the move is pending').toBe(true);
+  await expect(attachment).toBeVisible();
+  await expect(page.getByText('未保存',{exact:true})).toBeVisible();
+  expect((await getCollection()).data.item[0].item[0].request.body?.file?.src).toBeUndefined();
+  await page.getByRole('button',{name:'保存',exact:true}).click();
+  await expect.poll(async()=>(await getCollection()).data.item[0].item[0].request.body.file.src).toBe(uploadedPath);
+});
