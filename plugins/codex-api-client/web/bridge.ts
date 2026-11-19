@@ -5,7 +5,7 @@ let connection: Promise<void> | undefined;
 export async function connect() {
   if(window.__DEV_TOKEN__)return;
   if(!connection){
-    app=new App({name:'Codex API Client',version:'0.3.3'},{});
+    app=new App({name:'Codex API Client',version:'0.3.4'},{});
     app.onhostcontextchanged=ctx=>{if(!localStorage.getItem('api-theme')&&ctx.theme)document.documentElement.dataset.theme=ctx.theme;};
     connection=app.connect();
   }
