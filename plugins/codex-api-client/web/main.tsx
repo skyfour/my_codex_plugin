@@ -20,9 +20,9 @@ import {findItem,moveItem,compatibilityMode} from '../src/collections.mjs';
 import './style.css';
 
 type Doc={kind:string,id:string,revision:number,data:any};
-type Tab={key:string,doc:Doc,itemId?:string,dirty:boolean};
+type Tab={key:string,doc:Doc,itemId?:string,dirty:boolean,temporary?:boolean};
 type DropPosition='before'|'after'|'inside';
-type TreeChange='tree'|'request-drag';
+type TreeChange='tree'|'request-drag'|'request-save';
 const requestDragType='application/x-codex-api-request';
 type State={collections:Doc[],environments:Doc[],globals:Doc|null,settings:Doc|null,cookies:Doc|null,history:any[],defaults:any};
 const empty:State={collections:[],environments:[],globals:null,settings:null,cookies:null,history:[],defaults:{}};
@@ -47,6 +47,8 @@ function App(){
   const [runOptions,setRunOptions]=useState({iterations:1,delay:0,stopOnFailure:false}),[dataText,setDataText]=useState(''),[dataFormat,setDataFormat]=useState('json');
   const [settingsRevision,setSettingsRevision]=useState(0);
   const [settingsText,setSettingsText]=useState(''),[moveTarget,setMoveTarget]=useState(''),[movePosition,setMovePosition]=useState(0);
+  const [draftDestination,setDraftDestination]=useState({collectionId:'',parentId:'',name:''});
+  const [historyResult,setHistoryResult]=useState<any>(null);
   const [collapsed,setCollapsed]=useState<Record<string,boolean>>(()=>{try{return JSON.parse(localStorage.getItem('api-collapsed')||'{}');}catch{return {};}});
   useEffect(()=>{localStorage.setItem('api-collapsed',JSON.stringify(collapsed));},[collapsed]);
   const toggle=(key:string)=>setCollapsed(v=>({...v,[key]:!v[key]}));
@@ -101,7 +103,7 @@ function App(){
   useEffect(()=>{if(ready)localStorage.setItem('api-environment',environment);},[environment,ready]);
   useEffect(()=>{if(ready&&environment&&!state.environments.some(e=>e.id===environment))setEnvironment('');},[ready,state.environments,environment]);
   useEffect(()=>{const before=(e:BeforeUnloadEvent)=>{if(latest.current.tabs.some(t=>t.dirty)){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',before);return()=>window.removeEventListener('beforeunload',before);},[]);
-  useEffect(()=>{const key=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();if(!structureBusy.current&&!document.querySelector('[role=dialog]'))safe(()=>save(latest.current.tab));}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[]);
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();if(!structureBusy.current&&!document.querySelector('[role=dialog]'))safe(requestSave);}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);});
   const runningIds=Object.entries(results).filter(([,r])=>r.status==='running').map(([key,r])=>[key,r.id]);
   useEffect(()=>{
     if(!runningIds.length)return;
@@ -110,18 +112,25 @@ function App(){
     const timer=setInterval(poll,500);poll();return()=>{alive=false;clearInterval(timer);};
   },[JSON.stringify(runningIds)]);
 
-  function open(doc:Doc,itemId?:string){
+  function open(doc:Doc,itemId?:string,temporary=false){
     const key=doc.kind+':'+doc.id+':'+(itemId||'root');
-    setTabs(all=>{if(all.some(t=>t.key===key))return all;const existing=all.find(t=>t.doc.kind===doc.kind&&t.doc.id===doc.id);return [...all,{key,doc:clone(existing?.doc||doc),itemId,dirty:existing?.dirty||false}];});
-    activateTab({key,doc,itemId,dirty:false});
+    setTabs(all=>{if(all.some(t=>t.key===key))return all;const existing=all.find(t=>t.doc.kind===doc.kind&&t.doc.id===doc.id);return [...all,{key,doc:clone(existing?.doc||doc),itemId,temporary,dirty:temporary||existing?.dirty||false}];});
+    activateTab({key,doc,itemId,temporary,dirty:temporary});
   }
   function edit(patch:(draft:any)=>void){
-    // Request drags rebase late edits, including completed uploads, onto the moved tree.
+    // Request moves and first saves rebase late edits, including completed uploads.
     if(!tab||structureBusy.current==='tree')return;
-    setTabs(all=>{const current=all.find(t=>t.key===tab.key);if(!current)return all;const doc=clone(current.doc),node=nodeOf({...current,doc});if(!node)return all;patch(node);return all.map(t=>t.doc.kind===doc.kind&&t.doc.id===doc.id?{...t,doc,dirty:true}:t);});
+    setTabs(all=>{const current=all.find(t=>t.key===tab.key||(tab.temporary&&t.itemId===tab.itemId));if(!current)return all;const doc=clone(current.doc),node=nodeOf({...current,doc});if(!node)return all;patch(node);return all.map(t=>t.doc.kind===doc.kind&&t.doc.id===doc.id?{...t,doc,dirty:true}:t);});
+  }
+  async function requestSave(){
+    const current=latest.current.tab;
+    if(!current?.temporary)return save(current);
+    if(startLock.current||results[current.key]?.status==='running')return;
+    setDraftDestination({collectionId:state.collections[0]?.id||'new',parentId:'',name:''});
+    setModal('save-draft');
   }
   async function save(current=tab):Promise<Doc|undefined>{
-    if(!current)return;
+    if(!current||current.temporary)return;
     const key=current.doc.kind+':'+current.doc.id,pending=saves.current.get(key);
     if(pending){const saved=await pending,next=latest.current.tabs.find(t=>t.doc.kind===current!.doc.kind&&t.doc.id===current!.doc.id);return next?save({...current,doc:next.doc,dirty:next.dirty}):saved;}
     const live=latest.current.tabs.find(t=>t.doc.kind===current!.doc.kind&&t.doc.id===current!.doc.id);
@@ -135,12 +144,64 @@ function App(){
     })();
     saves.current.set(key,saving);try{return await saving;}finally{saves.current.delete(key);}
   }
+  async function saveDraft(){
+    return changeTree(async()=>{
+      const current=latest.current.tab;
+      if(!current?.temporary)return;
+      const item=nodeOf(current),snapshot=JSON.stringify(item);
+      const {collectionId,parentId,name}=draftDestination;
+      if(!item?.name?.trim())throw Error('请输入请求名称');
+      const isNew=collectionId==='new';
+      if(isNew&&!name.trim())throw Error('请输入集合名称');
+      if(!isNew)await saves.current.get('collection:'+collectionId);
+      const destination=isNew?null:await call<Doc>('api_document_get',{kind:'collection',id:collectionId});
+      if(!isNew&&!destination)throw Error('目标集合不存在，请选择其他集合');
+      const destinationDraft=latest.current.tabs.find(t=>t.dirty&&!t.temporary&&t.doc.kind==='collection'&&t.doc.id===destination?.id);
+      if(destinationDraft&&destinationDraft.doc.revision!==destination?.revision)throw Error('目标集合已更新，请先处理该集合的未保存修改');
+      const data=destination?clone(destination.data):{info:{name:name.trim()},item:[]};
+      const parent=parentId?findItem(data,parentId)?.item:data;
+      if(!Array.isArray(parent?.item))throw Error('目标文件夹不存在，请重新选择');
+      if(findItem(data,item.id))throw Error('该请求已存在于目标集合，请刷新工作区');
+      parent.item.push(item);
+      const saved=await call<Doc>('api_document_put',{kind:'collection',id:destination?.id||current.doc.id,revision:destination?.revision||0,data});
+      const nextKey=`collection:${saved.id}:${item.id}`;
+      setTabs(all=>{
+        const lateItem=nodeOf(all.find(t=>t.key===current.key));
+        const lateEdit=!!lateItem&&JSON.stringify(lateItem)!==snapshot;
+        const existing=all.find(t=>t.key!==current.key&&t.dirty&&t.doc.kind==='collection'&&t.doc.id===saved.id);
+        let doc=saved;
+        if(existing||lateEdit){
+          doc=clone(existing?{...existing.doc,revision:saved.revision}:saved);
+          if(existing){
+            const parent=parentId?findItem(doc.data,parentId)?.item:doc.data;
+            parent.item.push(findItem(saved.data,item.id)?.item);
+          }
+          if(lateEdit){
+            const savedItem=findItem(doc.data,item.id);
+            if(savedItem)savedItem.parent.item[savedItem.index]=lateItem;
+          }
+        }
+        const dirty=!!existing||lateEdit;
+        return all.map(t=>t.key===current.key?{key:nextKey,doc,itemId:item.id,dirty}:t.doc.kind==='collection'&&t.doc.id===saved.id?{...t,doc,dirty}:t);
+      });
+      if(nextKey!==current.key){
+        if(editorViews.current.has(current.key))editorViews.current.set(nextKey,editorViews.current.get(current.key)!);
+        if(scriptViews.current.has(current.key))scriptViews.current.set(nextKey,scriptViews.current.get(current.key)!);
+        setResults(all=>{const {[current.key]:previous,...rest}=all;return previous?{...rest,[nextKey]:previous}:all;});
+      }
+      setActive(key=>key===current.key?nextKey:key);
+      setCollapsed(v=>({...v,[saved.id]:false,...(parentId?{[saved.id+':'+parentId]:false}:{})}));
+      setCollectionSearch('');setSidebarOpen(true);setSection('collections');
+      setModal('');setNotice('已保存');await refresh();
+    },'request-save');
+  }
   async function reloadCurrent(){if(!tab)return;const fresh=await call<Doc>('api_document_get',{kind:tab.doc.kind,id:tab.doc.id});setTabs(all=>all.filter(t=>t.doc.id!==fresh.id||t.doc.kind!==fresh.kind||!t.itemId||findItem(fresh.data,t.itemId)).map(t=>t.doc.id===fresh.id&&t.doc.kind===fresh.kind?{...t,doc:fresh,dirty:false}:t));setError('');}
   async function newCollection(){setCollectionSearch('');const doc=await call<Doc>('api_document_put',{kind:'collection',revision:0,data:{info:{name:'新集合'},item:[]}});await refresh();open(doc);}
   async function newEnvironment(){const doc=await call<Doc>('api_document_put',{kind:'environment',revision:0,data:{name:'新环境',values:[]}});await refresh();setEnvironment(doc.id);open(doc);}
   async function changeTree(action:()=>Promise<void>,type:TreeChange='tree'){if(structureBusy.current)return;structureBusy.current=type;setChangingStructure(true);try{await action();}finally{structureBusy.current=null;setChangingStructure(false);}}
   async function newItem(folder=false,target=tab){return changeTree(async()=>{
     setCollectionSearch('');
+    if(target?.temporary)target=undefined;
     let doc:Doc|undefined;if(target?.doc.kind==='collection')doc=await save(target);else doc=state.collections[0];
     if(!doc){doc=await call<Doc>('api_document_put',{kind:'collection',revision:0,data:{info:{name:'新集合'},item:[]}});await refresh();}
     const item=folder?{name:'新文件夹',item:[]}:{name:'新请求',request:{method:'GET',url:'',header:[]},event:[]};
@@ -187,27 +248,42 @@ function App(){
   async function start(collectionRun=false,target=tab){
     if(structureBusy.current||!target||target.doc.kind!=='collection'||startLock.current||results[target.key]?.status==='running')return;
     startLock.current=true;setBusy(true);try{
-      const saved=await save(target);if(!saved)return;
-      const args:any={collectionId:saved.id,environmentId:environment||undefined,itemId:target.itemId};
-      if(collectionRun)Object.assign(args,{options:runOptions,dataText,dataFormat});
-      const r=await call('api_run_start',args);setResult({id:r.runId,status:'running',responses:[],assertions:[],logs:[],errors:[]},target.key);if(latest.current.tab?.key!==target.key)open(saved,target.itemId);setResponseIndex(0);setResponseTab('正文');setModal('');
+      let r;
+      const environmentId=environment||undefined;
+      if(target.temporary){
+        r=await call('api_run_draft',{item:nodeOf(target),environmentId});
+      }else{
+        const saved=await save(target);if(!saved)return;
+        const args:any={collectionId:saved.id,environmentId,itemId:target.itemId};
+        if(collectionRun)Object.assign(args,{options:runOptions,dataText,dataFormat});
+        r=await call('api_run_start',args);
+        if(latest.current.tab?.key!==target.key)open(saved,target.itemId);
+      }
+      setResult({id:r.runId,status:'running',responses:[],assertions:[],logs:[],errors:[]},target.key);
+      setResponseIndex(0);setResponseTab('正文');setModal('');
     }finally{startLock.current=false;setBusy(false);}
   }
   useEffect(()=>{const key=(e:KeyboardEvent)=>{if(!(e.metaKey||e.ctrlKey)||e.isComposing||document.querySelector('[role=dialog]'))return;if(e.key==='Enter'&&request&&!busy&&!running){e.preventDefault();if(!e.repeat&&rawUrl(request).trim())safe(()=>start());}else if(e.key.toLowerCase()==='k'){e.preventDefault();setSidebarOpen(true);setSection('collections');requestAnimationFrame(()=>collectionSearchInput.current?.focus());}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);});
   async function introspectGraphql(){
     const current=latest.current.tab;if(!current?.itemId)throw Error('请先选择 GraphQL 请求');
-    const saved=await save(current);if(!saved)throw Error('保存请求失败');
-    const {runId}=await call('api_graphql_introspect',{collectionId:saved.id,itemId:current.itemId,environmentId:environment||undefined});
+    const environmentId=environment||undefined;
+    const saved=current.temporary?current.doc:await save(current);
+    if(!saved)throw Error('保存请求失败');
+    const {runId}=current.temporary
+      ?await call('api_run_draft',{item:nodeOf(current),environmentId,introspect:true})
+      :await call('api_graphql_introspect',{collectionId:saved.id,itemId:current.itemId,environmentId});
     const deadline=Date.now()+125000;
     while(Date.now()<deadline){
       const result=await call('api_run_result',{runId,includeBodies:true});
+      const key=current.temporary?latest.current.tabs.find(t=>t.itemId===current.itemId)?.key:current.key;
+      if(key)setResult(result,key);
       if(result.status!=='running'){
-        setResult(result,current.key);await refresh();
+        await refresh();
         if(result.status!=='completed')throw Error(result.errors?.map((e:any)=>e.message).join('；')||'Schema 查询失败');
         const response=result.responses?.at(-1);if(!response||response.code>=400)throw Error('Schema HTTP 请求失败：'+(response?.code||'无响应'));
         return JSON.parse(response.body);
       }
-      setResult(result,current.key);await new Promise(r=>setTimeout(r,300));
+      await new Promise(r=>setTimeout(r,300));
     }
     await call('api_run_cancel',{runId});throw Error('Schema 查询超时');
   }
@@ -221,7 +297,14 @@ function App(){
   async function importNow(){
     if(transferLock.current||importDone)return;transferLock.current=true;setTransferBusy(true);
     try{
-      const r=await call('api_import',{text:importText,localFiles:importFiles});setImportDone(true);setImportWarnings(r.warnings);await refresh();
+      const r=await call('api_import_interactive',{text:importText,localFiles:importFiles});setImportDone(true);
+      if(r.draft){
+        open(r.draft,r.draft.data.item[0].id,true);
+        setModal('');setImportText('');
+        setNotice(['已打开临时请求',...r.warnings].join('。'));
+        return;
+      }
+      setImportWarnings(r.warnings);await refresh();
       if(r.document){if(r.document.kind==='environment')setEnvironment(r.document.id);open(r.document);}
       setNotice(r.documents?`导入成功：${r.collectionCount} 个集合、${r.environmentCount} 个环境`:'导入成功');
       if(!r.warnings.length){setModal('');setImportText('');}
@@ -230,7 +313,7 @@ function App(){
   async function exportAll(){
     if(transferLock.current)return;transferLock.current=true;setTransferBusy(true);
     try{
-      const dirty=new Map(latest.current.tabs.filter(t=>t.dirty).map(t=>[t.doc.kind+':'+t.doc.id,t]));
+      const dirty=new Map(latest.current.tabs.filter(t=>t.dirty&&!t.temporary).map(t=>[t.doc.kind+':'+t.doc.id,t]));
       for(const draft of dirty.values())await save(draft);
       const r=await call('api_workspace_export');await download(r.name,stringify(r.data));setModal('');setNotice('已导出全部集合、环境和 API 脚本');
     }finally{transferLock.current=false;setTransferBusy(false);}
@@ -326,20 +409,20 @@ function App(){
       <aside className="sidebar" hidden={!sidebarOpen}><div className="workspace-title"><span>我的工作区</span><button aria-label="刷新工作区" onClick={()=>safe(refresh)}>↻</button></div><div className="side-nav">{[['collections','集合'],['history','历史']].map(([key,label])=><button key={key} className={section===key?'active':''} onClick={()=>setSection(key)}>{label}</button>)}</div>
       <div className="side-tools">{section==='collections'?<><button onClick={()=>safe(newCollection)}>＋ 新建集合</button><button onClick={()=>{setImportWarnings([]);setImportFiles({});setModal('import');}}>导入</button><button onClick={()=>setModal('export-workspace')}>导出全部</button><button onClick={()=>setModal('backup')}>完整备份与恢复</button></>:<span className="muted">最近 100 次运行</span>}</div>
       <div className="collection-search"><input ref={collectionSearchInput} aria-label="搜索集合和请求" placeholder="搜索名称、URL…" value={collectionSearch} onChange={e=>setCollectionSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){setCollectionSearch('');e.currentTarget.blur();}}}/>{collectionSearch&&<button aria-label="清空集合搜索" onClick={()=>{setCollectionSearch('');collectionSearchInput.current?.focus();}}>×</button>}</div><div className="side-scroll">{section==='collections'&&<>{!state.collections.length&&<div className="side-empty">创建一个集合，<br/>开始整理你的 API。</div>}{state.collections.filter(doc=>matchesTree(doc.data)).map(doc=><div className="collection" key={doc.id}><div {...treeDropProps(doc)} onContextMenu={e=>rowMenu(e,doc)} className={'collection-head '+(active===`collection:${doc.id}:root`?'selected':'')}><button className="tree-toggle" aria-label={(collapsed[doc.id]?'展开 ':'收起 ')+doc.data.info.name} aria-expanded={!collapsed[doc.id]} onClick={()=>toggle(doc.id)}><TreeIcon name={collapsed[doc.id]?'right':'down'}/></button><TreeIcon name="collection"/><button className="tree-name" onClick={()=>{toggle(doc.id);open(doc);}}>{doc.data.info.name}</button><small>{countRequests(doc.data)}</small>{menuButton(doc)}</div>{(treeQuery||!collapsed[doc.id])&&renderTree(doc,doc.data.item,0,doc.data.info.name.toLocaleLowerCase().includes(treeQuery))}</div>)}</>}
-      {section==='collections'&&treeQuery&&!state.collections.some(doc=>matchesTree(doc.data))&&<div className="side-empty">没有匹配的集合或请求</div>}{section==='history'&&state.history.filter(h=>!treeQuery||h.name.toLocaleLowerCase().includes(treeQuery)).map(h=><button className="history-row" key={h.id} onClick={()=>safe(async()=>{const value=await call('api_run_result',{runId:h.id,includeBodies:true});setResponseIndex(0);const doc=state.collections.find(c=>c.id===value.collectionId);if(doc){const itemId=value.itemId&&findItem(doc.data,value.itemId)?value.itemId:undefined;setResult(value,`collection:${doc.id}:${itemId||'root'}`);open(doc,itemId);}else{setResult(value);setModal('history');}})}><span className={'run-dot '+h.status}/><span><b>{h.name}</b><small>{new Date(h.createdAt).toLocaleString('zh-CN')} · {h.responses} 个响应</small></span><small>{h.failed?'失败 '+h.failed:h.status==='running'?'运行中':'查看'}</small></button>)}
+      {section==='collections'&&treeQuery&&!state.collections.some(doc=>matchesTree(doc.data))&&<div className="side-empty">没有匹配的集合或请求</div>}{section==='history'&&state.history.filter(h=>!treeQuery||h.name.toLocaleLowerCase().includes(treeQuery)).map(h=><button className="history-row" key={h.id} onClick={()=>safe(async()=>{const value=await call('api_run_result',{runId:h.id,includeBodies:true});setResponseIndex(0);const doc=state.collections.find(c=>c.id===value.collectionId);if(doc){const itemId=value.itemId&&findItem(doc.data,value.itemId)?value.itemId:undefined;setResult(value,`collection:${doc.id}:${itemId||'root'}`);open(doc,itemId);}else{setHistoryResult(value);setModal('history');}})}><span className={'run-dot '+h.status}/><span><b>{h.name}</b><small>{new Date(h.createdAt).toLocaleString('zh-CN')} · {h.responses} 个响应</small></span><small>{h.failed?'失败 '+h.failed:h.status==='running'?'运行中':'查看'}</small></button>)}
       </div><footer className="sidebar-footer"><i/>数据保存在本机<span>v0.3</span></footer></aside>
       <div className="vertical-handle" hidden={!sidebarOpen} role="separator" aria-label="调整侧栏宽度" onPointerDown={e=>resize(e,'sidebar')}/>
-      <main className="main"><div className="request-tabs">{tabs.map(t=><div key={t.key} className={'request-tab '+(t.key===active?'active':'')}><button onClick={()=>{activateTab(t);}}><span className="tab-method">{nodeOf(t)?.request?.method||'◈'}</span>{titleOf(t)}{t.dirty&&<span className="dirty-dot"/>}</button><button aria-label={'关闭 '+titleOf(t)} onClick={()=>{const close=()=>{setTabs(all=>all.filter(v=>v.key!==t.key));if(active===t.key){const next=tabs.find(v=>v.key!==t.key);activateTab(next);}};t.dirty?ask('此集合或环境有未保存修改。关闭最后一个相关标签会丢失修改；其他相关标签仍会保留草稿。',close):close();}}>×</button></div>)}<button className="add-tab" aria-label="新建请求标签" onClick={()=>safe(()=>newItem())}>＋</button></div>
-      {(error||notice)&&<div className={'message '+(error?'error':'success')} role={error?'alert':'status'}><span>{error||notice}</span>{error.includes('CONFLICT')&&<button onClick={()=>ask('重新加载会丢弃此集合或环境所有标签的未保存修改。',()=>safe(reloadCurrent))}>重新加载当前内容</button>}<button aria-label="关闭提示" onClick={()=>{setError('');setNotice('');}}>×</button></div>}
+      <main className="main"><div className="request-tabs">{tabs.map(t=><div key={t.key} className={'request-tab '+(t.key===active?'active':'')}><button onClick={()=>{activateTab(t);}}><span className="tab-method">{nodeOf(t)?.request?.method||'◈'}</span>{titleOf(t)}{t.dirty&&<span className="dirty-dot"/>}</button><button aria-label={'关闭 '+titleOf(t)} onClick={()=>{const close=()=>{setTabs(all=>all.filter(v=>v.key!==t.key));if(active===t.key){const next=tabs.find(v=>v.key!==t.key);activateTab(next);}};t.dirty?ask(t.temporary?'关闭后将丢弃此未保存的请求。':'此集合或环境有未保存修改。关闭最后一个相关标签会丢失修改；其他相关标签仍会保留草稿。',close):close();}}>×</button></div>)}<button className="add-tab" aria-label="新建请求标签" onClick={()=>safe(()=>newItem())}>＋</button></div>
+      {(error||notice)&&<div className={'message '+(error?'error':'success')} role={error?'alert':'status'}><span>{error||notice}</span>{!tab?.temporary&&error.includes('CONFLICT')&&<button onClick={()=>ask('重新加载会丢弃此集合或环境所有标签的未保存修改。',()=>safe(reloadCurrent))}>重新加载当前内容</button>}<button aria-label="关闭提示" onClick={()=>{setError('');setNotice('');}}>×</button></div>}
       {tabs.filter(t=>nodeOf(t)?.request?.['x-codex-api-client']?.protocol).map(t=><ProtocolClient key={t.key} visible={t.key===active} request={nodeOf(t).request} collectionId={t.doc.id} itemId={t.itemId!} environmentId={environment} onSave={async()=>{
         if(structureBusy.current)throw Error('集合正在更新，请稍后重试');
         return save(latest.current.tabs.find(v=>v.key===t.key));
       }} onChange={patch=>edit(n=>patch(n.request))}/>)}
       {tab&&!protocol?<div className="editor-workspace" inert={changingStructure} aria-busy={changingStructure}>
-        <div className="editor-top"><div className="breadcrumb">{tab.doc.kind==='collection'?'集合':tab.doc.kind==='globals'?'全局变量':'环境'}<span>/</span>{titleOf(tab)}{tab.dirty&&<small>未保存</small>}</div></div>
+        <div className="editor-top"><div className="breadcrumb">{tab.temporary?'临时请求':tab.doc.kind==='collection'?'集合':tab.doc.kind==='globals'?'全局变量':'环境'}<span>/</span>{titleOf(tab)}{tab.dirty&&<small>未保存</small>}</div></div>
         <div className={"panes "+(!showResponse?"document-panes":"")}><section className="request-pane" style={{height:showResponse?split+'%':'100%'}}>
-        <div className="name-row"><input aria-label="名称" className="name-input" value={node?.info?.name||node?.name||(tab.doc.kind==='globals'?'全局变量':'')} onChange={e=>edit(n=>{if(n.info)n.info.name=e.target.value;else n.name=e.target.value;})}/><div className="editor-controls"><button title="保存修改（⌘ / Ctrl + S）" onClick={()=>safe(()=>save())}>保存</button><button aria-label="更多操作" onClick={()=>{setActionTarget(undefined);setModal('actions');}}>•••</button></div>{tab.doc.kind==='collection'&&!request&&<div className="inline-actions"><button onClick={()=>safe(()=>newItem())}>新建请求</button><button onClick={()=>safe(()=>newItem(true))}>新建文件夹</button>{!request&&<button className="primary" onClick={()=>{setActionTarget(undefined);setModal('runner');}}>{tab.itemId?'运行文件夹':'运行集合'}</button>}</div>}</div>
-        {request&&<div className="url-bar"><select aria-label="请求协议" value="http" onChange={e=>edit(n=>{n.request['x-codex-api-client']={...n.request['x-codex-api-client'],protocol:{version:1,type:e.target.value}};})}><option value="http">HTTP</option><option value="sse">SSE</option><option value="websocket">WebSocket</option><option value="socketio">Socket.IO</option><option value="grpc">gRPC</option><option value="mqtt">MQTT</option><option value="mcp">MCP</option></select><select aria-label="请求方法" value={request.method||'GET'} onChange={e=>edit(n=>{n.request.method=e.target.value;})}>{['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(m=><option key={m}>{m}</option>)}</select><UrlInput variables={variableValues} value={rawUrl(request)} onChange={value=>edit(n=>{n.request.url=value;delete n.request._query;})}/>{running?<button className="danger" onClick={()=>safe(()=>call('api_run_cancel',{runId:result.id}))}>取消</button>:<button aria-label="发送" title="发送请求（⌘ / Ctrl + Enter）" className="primary" disabled={busy||!rawUrl(request)} onClick={()=>safe(()=>start())}>发送<span>↗</span></button>}</div>}
+        <div className="name-row"><input aria-label="名称" className="name-input" value={node?.info?.name||node?.name||(tab.doc.kind==='globals'?'全局变量':'')} onChange={e=>edit(n=>{if(n.info)n.info.name=e.target.value;else n.name=e.target.value;})}/><div className="editor-controls"><button title="保存修改（⌘ / Ctrl + S）" disabled={tab.temporary&&(busy||running)} onClick={()=>safe(requestSave)}>保存</button>{!tab.temporary&&<button aria-label="更多操作" onClick={()=>{setActionTarget(undefined);setModal('actions');}}>•••</button>}</div>{tab.doc.kind==='collection'&&!request&&<div className="inline-actions"><button onClick={()=>safe(()=>newItem())}>新建请求</button><button onClick={()=>safe(()=>newItem(true))}>新建文件夹</button>{!request&&<button className="primary" onClick={()=>{setActionTarget(undefined);setModal('runner');}}>{tab.itemId?'运行文件夹':'运行集合'}</button>}</div>}</div>
+        {request&&<div className="url-bar"><select aria-label="请求协议" value="http" disabled={tab.temporary} title={tab.temporary?'保存到集合后可更改协议':undefined} onChange={e=>edit(n=>{n.request['x-codex-api-client']={...n.request['x-codex-api-client'],protocol:{version:1,type:e.target.value}};})}><option value="http">HTTP</option><option value="sse">SSE</option><option value="websocket">WebSocket</option><option value="socketio">Socket.IO</option><option value="grpc">gRPC</option><option value="mqtt">MQTT</option><option value="mcp">MCP</option></select><select aria-label="请求方法" value={request.method||'GET'} onChange={e=>edit(n=>{n.request.method=e.target.value;})}>{['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(m=><option key={m}>{m}</option>)}</select><UrlInput variables={variableValues} value={rawUrl(request)} onChange={value=>edit(n=>{n.request.url=value;delete n.request._query;})}/>{running?<button className="danger" onClick={()=>safe(()=>call('api_run_cancel',{runId:result.id}))}>取消</button>:<button aria-label="发送" title="发送请求（⌘ / Ctrl + Enter）" className="primary" disabled={busy||!rawUrl(request)} onClick={()=>safe(()=>start())}>发送<span>↗</span></button>}</div>}
         <nav className="editor-nav">{(tab.doc.kind!=='collection'?['变量']:request?['参数','认证','请求头','请求体','脚本','网络']:['概览','认证','脚本','变量']).map(label=><button key={label} aria-label={label} className={editorTab===label?'active':''} onClick={()=>{setEditorTab(label);editorViews.current.set(active,label);}}>{label}{label==='请求头'&&request?.header?.length>0&&<small>{request.header.length}</small>}</button>)}</nav>
         <div className="editor-content" key={tab.key+':'+editorTab}>
           {editorTab==='概览'&&<div className="overview"><div className="overview-heading"><TreeIcon name="collection"/><div><b>{tab.itemId?'文件夹概览':'集合概览'}</b><p className="muted">组织接口请求，共享认证、变量和脚本。</p></div></div><label>描述<textarea aria-label="描述" rows={4} value={typeof (node.info?.description??node.description)==='string'?(node.info?.description??node.description):(node.info?.description??node.description)?.content||''} onChange={e=>edit(n=>{if(n.info)n.info.description=e.target.value;else n.description=e.target.value;})}/></label>{!tab.itemId&&<label>兼容模式<select aria-label="集合兼容模式" value={compatibilityMode(node)} onChange={e=>edit(n=>{n['x-codex-api-client']={...n['x-codex-api-client'],compatibilityMode:e.target.value};})}><option value="strict">严格 Postman</option><option value="extended">文件夹变量扩展</option></select><p className="muted">严格模式：local &gt; data &gt; environment &gt; collection &gt; global；忽略文件夹变量。扩展模式：文件夹变量作为临时变量，优先于运行数据；既有文件夹集合保留此行为。</p></label>}<div className="overview-metrics"><div><b>{countRequests(node)}</b><span>个请求</span></div><div><b>{(node.event||[]).filter((e:any)=>e.script?.exec?.length).length}</b><span>段脚本</span></div></div></div>}
@@ -369,9 +452,24 @@ function App(){
     {modal==='backup'&&<WorkspaceBackup context={{selectedEnvironment:environment,ui:{theme,sidebarOpen,responseTab}}} onClose={()=>setModal('')} onRestored={async()=>{await preferenceWrites.current;preferencesHydrated.current=false;await refresh();}}/>}
     {modal==='import' &&<Modal title="导入请求" wide onClose={()=>{if(!transferBusy)setModal('');}}><p className="muted">选择工作区备份，一次导入集合、环境、全局变量及 API 脚本；也兼容 Postman Collection v2.1、环境 JSON、cURL、OpenAPI3/Swagger2 JSON/YAML 和 HAR。</p><textarea aria-label="导入内容" rows={8} disabled={transferBusy||importDone} value={importText} onChange={e=>setImportText(e.target.value)} placeholder="curl 'http://localhost:3000/users'"/><label className="file-picker">或选择导入文件<input aria-label="选择导入文件" type="file" disabled={transferBusy||importDone} accept=".json,.txt,.yaml,.yml,.har" onChange={e=>{const f=e.target.files?.[0];if(f)safe(async()=>{setImportFiles({});if(f.size>20*1024*1024)throw new Error('导入文件不能超过 20 MB');setImportText(await f.text());});}}/></label><label className="file-picker">补充 OpenAPI 本地依赖（不会自动读取磁盘或联网）<input aria-label="OpenAPI 本地依赖文件" type="file" multiple accept=".json,.yaml,.yml" disabled={transferBusy||importDone} onChange={e=>{const files=Array.from(e.target.files||[]);safe(()=>loadImportFiles(files));}}/></label><label className="file-picker">或选择依赖目录（相对路径以所选目录为根）<input aria-label="OpenAPI 依赖目录" type="file" {...({webkitdirectory:'',directory:''} as any)} disabled={transferBusy||importDone} onChange={e=>safe(()=>loadImportFiles(Array.from(e.target.files||[]),true))}/></label>{Object.keys(importFiles).length>0&&<><p>{Object.keys(importFiles).join('、')}</p><button onClick={()=>setImportFiles({})}>清空依赖文件</button></>}<ImportPreview text={importText} localFiles={importFiles}/>{importWarnings.length>0&&<div className="warning">已导入，但这些能力需要调整：{importWarnings.map(w=><p key={w}>{w}</p>)}</div>}<footer><button disabled={transferBusy} onClick={()=>setModal('')}>关闭</button><button className="primary" disabled={!importText.trim()||transferBusy||importDone} onClick={()=>safe(importNow)}>{transferBusy?'导入中…':importDone?'已导入':'确认导入'}</button></footer></Modal>}
     {modal==='runner'&&<Modal title={nodeOf(dialogTarget)?.request?'运行请求':dialogTarget?.itemId?'运行文件夹':'运行集合'} onClose={()=>setModal('')}><p>顺序运行 {titleOf(dialogTarget!)} 中的请求与脚本。</p><div className="form-grid"><label>迭代次数<input type="number" min={1} max={1000} value={runOptions.iterations} onChange={e=>setRunOptions({...runOptions,iterations:Number(e.target.value)})}/></label><label>请求间隔（毫秒）<input type="number" min={0} value={runOptions.delay} onChange={e=>setRunOptions({...runOptions,delay:Number(e.target.value)})}/></label></div><label className="checkbox"><input type="checkbox" checked={runOptions.stopOnFailure} onChange={e=>setRunOptions({...runOptions,stopOnFailure:e.target.checked})}/>断言失败或请求出错时停止</label><label>运行数据<select value={dataFormat} onChange={e=>setDataFormat(e.target.value)}><option value="json">JSON</option><option value="csv">CSV</option></select><textarea aria-label="运行数据" rows={5} value={dataText} placeholder="可选：JSON 对象数组或 CSV" onChange={e=>setDataText(e.target.value)}/></label><label className="file-picker">选择数据文件<input type="file" accept=".csv,.json" onChange={e=>{const f=e.target.files?.[0];if(f){setDataFormat(f.name.endsWith('.csv')?'csv':'json');f.text().then(setDataText);}}}/></label><footer><button onClick={()=>setModal('')}>取消</button><button className="primary" disabled={busy} onClick={()=>safe(()=>start(true,dialogTarget))}>开始运行</button></footer></Modal>}
-    {modal==='history'&&<Modal title="历史运行结果" wide onClose={()=>setModal('')}><pre>{stringify(result)}</pre><footer><button onClick={()=>safe(()=>download('run-report.json',stringify(result)))}>导出报告</button></footer></Modal>}
-    {modal==='export-workspace'&&<Modal title="导出工作区备份" onClose={()=>{if(!transferBusy)setModal('');}}><p>一次保存全部 {state.collections.length} 个集合、{state.environments.length} 个环境及全局变量。</p><p className="muted">包含文件夹结构、请求配置和各级请求前／响应后脚本。导出前会保存当前草稿；同一文件可用于其他电脑的 API Client。</p><p className="muted">已标记的敏感变量仅保留名称。Cookie、运行历史、机器设置和本地附件文件不包含在备份中。</p><footer><button disabled={transferBusy} onClick={()=>setModal('')}>取消</button><button className="primary" disabled={transferBusy} onClick={()=>safe(exportAll)}>{transferBusy?'导出中…':'导出备份'}</button></footer></Modal>}
+    {modal==='history'&&<Modal title="历史运行结果" wide onClose={()=>setModal('')}><pre>{stringify(historyResult)}</pre><footer><button onClick={()=>safe(()=>download('run-report.json',stringify(historyResult)))}>导出报告</button></footer></Modal>}
+    {modal==='export-workspace'&&<Modal title="导出工作区备份" onClose={()=>{if(!transferBusy)setModal('');}}><p>一次保存全部 {state.collections.length} 个集合、{state.environments.length} 个环境及全局变量。</p><p className="muted">包含文件夹结构、请求配置和各级请求前／响应后脚本。导出前会保存已有集合和环境的修改；临时请求须先手动保存到集合。</p><p className="muted">已标记的敏感变量仅保留名称。Cookie、运行历史、机器设置和本地附件文件不包含在备份中。</p><footer><button disabled={transferBusy} onClick={()=>setModal('')}>取消</button><button className="primary" disabled={transferBusy} onClick={()=>safe(exportAll)}>{transferBusy?'导出中…':'导出备份'}</button></footer></Modal>}
     {modal==='actions'&&<Modal title="更多操作" onClose={()=>setModal('')}><div className="action-list"><button onClick={()=>safe(()=>exportCurrent())}>导出 Postman 文件</button>{tab?.doc.kind==='collection'&&!tab.itemId&&<button onClick={()=>safe(()=>copyCollection())}>复制集合</button>}{tab?.doc.kind==='environment'&&<button onClick={()=>safe(async()=>{const doc=await save();if(!doc)return;const copied=await call<Doc>('api_document_duplicate',{kind:'environment',id:doc.id});await refresh();setModal('');open(copied);})}>复制环境</button>}{request&&<button onClick={()=>safe(()=>exportCurrent('curl'))}>导出 cURL</button>}{tab?.itemId&&<><button onClick={()=>safe(()=>treeAction('duplicate'))}>复制请求或文件夹</button><button onClick={()=>{setActionTarget(undefined);setMoveTarget('');setMovePosition(0);setModal('move');}}>移动或排序</button><button onClick={()=>{setActionTarget(undefined);setModal('runner');}}>{request?'请求运行选项':'文件夹运行选项'}</button></>}<button onClick={()=>ask('重新加载会丢弃此集合或环境所有标签的未保存修改。',()=>safe(reloadCurrent))}>重新加载当前内容</button><button className="danger-text" onClick={()=>ask('确认删除 '+titleOf(tab!)+'？',()=>safe(()=>tab?.itemId?treeAction('delete'):removeDoc()).then(()=>setModal('')))}>删除</button></div></Modal>}
+    {modal==='save-draft'&&<Modal title="保存请求" onClose={()=>{if(!changingStructure)setModal('');}}>
+      <form onSubmit={e=>{e.preventDefault();safe(saveDraft);}}>
+        <label>目标集合<select aria-label="目标集合" value={draftDestination.collectionId} disabled={changingStructure} onChange={e=>setDraftDestination({...draftDestination,collectionId:e.target.value,parentId:''})}>
+          {state.collections.map(doc=><option key={doc.id} value={doc.id}>{doc.data.info.name}</option>)}
+          <option value="new">新建集合</option>
+        </select></label>
+        {draftDestination.collectionId==='new'
+          ?<label>集合名称<input aria-label="集合名称" value={draftDestination.name} disabled={changingStructure} onChange={e=>setDraftDestination({...draftDestination,name:e.target.value})}/></label>
+          :<label>目标文件夹<select aria-label="目标文件夹" value={draftDestination.parentId} disabled={changingStructure} onChange={e=>setDraftDestination({...draftDestination,parentId:e.target.value})}>
+            <option value="">集合根目录</option>
+            {folders(state.collections.find(doc=>doc.id===draftDestination.collectionId)?.data||{}).map(folder=><option key={folder.id} value={folder.id}>{folder.path}</option>)}
+          </select></label>}
+        <footer><button type="button" disabled={changingStructure} onClick={()=>setModal('')}>取消</button><button className="primary" disabled={changingStructure||(draftDestination.collectionId==='new'&&!draftDestination.name.trim())}>确认保存</button></footer>
+      </form>
+    </Modal>}
     {modal==='move'&&<Modal title="移动或排序" onClose={()=>setModal('')}><label>目标文件夹<select aria-label="目标文件夹" value={moveTarget} onChange={e=>setMoveTarget(e.target.value)}><option value="">集合根目录</option>{folders((dialogTarget!).doc.data).filter((f:any)=>f.id!==dialogTarget?.itemId&&!findItem(nodeOf(dialogTarget),f.id)).map((f:any)=><option key={f.id} value={f.id}>{f.path}</option>)}</select></label><label>插入位置（从 0 开始）<input type="number" min={0} value={movePosition} onChange={e=>setMovePosition(Number(e.target.value))}/></label><footer><button className="primary" onClick={()=>safe(()=>treeAction('move',dialogTarget))}>确认移动</button></footer></Modal>}
     {modal==='settings'&&<SettingsPanel value={settingsText} onChange={setSettingsText} theme={theme} onClose={()=>setModal('')} onCookies={()=>{setModal('cookies');}} onSave={data=>safe(async()=>{await call('api_document_put',{kind:'settings',id:'default',revision:settingsRevision,data});await refresh();setModal('');setNotice('设置已保存');})}/>}
     {modal==='cookies'&&<CookieManager document={state.cookies} onClose={()=>setModal('')} onSaved={refresh}/>}

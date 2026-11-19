@@ -1,4 +1,5 @@
 import {authProblem} from './auth.mjs';
+import {isValidAccept} from './accept-header.mjs';
 import {parseSpecText,importOpenApi,importHar} from './spec-import.mjs';
 import { parse as shellParse } from 'shell-quote';
 import { parse as csvParse } from 'csv-parse/sync';
@@ -22,7 +23,10 @@ export function warningsFor(value) {
 export function importDocument(text,options={}) {
   if(Buffer.byteLength(text,'utf8')>TRANSFER_LIMIT)throw new Error('IMPORT: 文件超过 20 MB');
   text = text.trim();
-  if (text.startsWith('curl ')) return { kind: 'collection', data: normalizeCollection({ info: { name: 'cURL 导入' }, item: [curlRequest(text)] },{imported:true}), warnings: [] };
+  if (text.startsWith('curl ')) {
+    const {item, warnings} = curlRequest(text);
+    return { kind: 'collection', source: 'curl', data: normalizeCollection({ info: { name: 'cURL 导入' }, item: [item] },{imported:true}), warnings };
+  }
   const data = parseSpecText(text);
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('IMPORT: 需要集合或环境对象');
   if(data.format===WORKSPACE_FORMAT)return parseWorkspace(data);
@@ -40,10 +44,16 @@ export function importDocument(text,options={}) {
   throw new Error('IMPORT: 无法识别 Postman Collection v2.1、环境、OpenAPI/Swagger 或 HAR 文件');
 }
 function curlRequest(text) {
-  const tokens = shellParse(text.replace(/\\\r?\n/g, ' '), key => '$' + key);
+  // Keep literal newlines in single-quoted arguments so header validation can see them.
+  const command = text.replace(/"(?:[^"\\]|\\[\s\S])*"|\$'(?:[^'\\]|\\[\s\S])*'|'[^']*'|\\\r?\n|\\[\s\S]/g, part => {
+    if (part.startsWith('"')) return part.replace(/\\(?:\r?\n|[\s\S])/g, escaped => /^\\\r?\n$/.test(escaped) ? '' : escaped);
+    return /^\\\r?\n$/.test(part) ? ' ' : part;
+  });
+  const tokens = shellParse(command, key => '$' + key);
   if (tokens.some(t => typeof t !== 'string')) throw new Error('SHELL: 不允许管道、重定向或复合命令');
   const req = { method: 'GET', url: '', header: [] };
   let explicitMethod = false, getData = false;
+  let invalidAccept = false;
   const body = [];
   for (let i = 1; i < tokens.length; i++) {
     let t = tokens[i], val;
@@ -56,7 +66,15 @@ function curlRequest(text) {
     else if(t==='-e'||t==='--referer'){const value=next();if(value.endsWith(';auto'))throw new Error('UNSUPPORTED: cURL 自动 Referer');req.header.push({key:'Referer',value});}
     else if(t==='--data-urlencode'){const value=next(),at=value.indexOf('=');if((at<0&&value.includes('@'))||value.startsWith('@'))throw new Error('UNSUPPORTED: cURL data-urlencode 文件读取');body.push(at<0?encodeURIComponent(value):value.slice(0,at)+'='+encodeURIComponent(value.slice(at+1)));if(!explicitMethod)req.method='POST';}
     else if (t === '--url') req.url = next();
-    else if (t === '-H' || t === '--header') { const h = next(), at = h.indexOf(':'); if (at < 1) throw new Error('IMPORT: Header 格式错误'); req.header.push({ key: h.slice(0,at), value: h.slice(at+1).trim() }); }
+    else if (t === '-H' || t === '--header') {
+      const header = next(), separator = header.indexOf(':');
+      if (separator < 1) throw new Error('IMPORT: Header 格式错误');
+      const key = header.slice(0, separator), value = header.slice(separator + 1);
+      if (key.toLowerCase() === 'accept' && !isValidAccept(value)) {
+        invalidAccept = true;
+        req.header.push({key, value: value.replace(/^[ \t]+/, ''), disabled: true});
+      } else req.header.push({key, value: value.trim()});
+    }
     else if (t === '-u' || t === '--user') { const [username, ...password] = next().split(':'); req.auth = { type: 'basic', basic: [{ key: 'username', value: username }, { key: 'password', value: password.join(':') }] }; }
     else if (['-d','--data','--data-raw','--data-binary','--json'].includes(t)) {
       const v = next();
@@ -86,7 +104,8 @@ function curlRequest(text) {
   if (body.length) { if (req.body) throw new Error('IMPORT: 不允许混合请求体'); req.body = { mode: 'raw', raw: body.join('&') }; }
   if(req.body&&req.body.mode!=='formdata'&&!req.header.some(h=>h.key.toLowerCase()==='content-type'))req.header.push({key:'Content-Type',value:'application/x-www-form-urlencoded'});
   if (!req.url) throw new Error('IMPORT: 缺少 URL');
-  return { name: req.url, request: req };
+  const warnings = invalidAccept ? ['Accept 请求头格式无效，已默认禁用。请修改后再启用。'] : [];
+  return {item: {name: req.url, request: req}, warnings};
 }
 export function exportCurl(item, inheritedAuth) {
   const r = item.request, auth=r.auth||inheritedAuth;

@@ -3,6 +3,7 @@ const id=z.string().min(1).max(200);
 const kind=z.enum(['collection','environment','globals','settings','cookies']);
 const object=z.record(z.string(),z.unknown());
 const revision=z.number().int().min(0);
+const importInput=z.object({text:z.string().max(20*1024*1024),localFiles:z.record(z.string(),z.string()).optional()}).strict();
 const options=z.object({
   requestTimeout:z.number().int().positive().optional(),scriptTimeout:z.number().int().positive().optional(),
   runTimeout:z.number().int().positive().optional(),iterations:z.number().int().positive().optional(),
@@ -35,12 +36,14 @@ export const TOOL_DEFINITIONS = [
   ['api_document_delete','按最新 revision 删除本地文档。',z.object({kind,id,revision}).strict(),'remove',false],
   ['api_item_edit','新建、更新、复制、移动、排序或删除集合内的请求和文件夹。新建提供 item 和 parentId；根目录省略 parentId。',z.object({collectionId:id,itemId:id.optional(),operation:z.enum(['upsert','duplicate','move','delete']),parentId:id.optional(),position:z.number().int().min(0).optional(),item:object.optional(),revision}).strict(),'editItem',false],
   ['api_workspace_export','导出全部集合、环境、全局变量和 API 脚本为工作区备份，排除已标记的敏感值。',z.object({}).strict(),'exportWorkspace',true],
-  ['api_import_preview','验证工作区备份或 Postman/cURL、OpenAPI3/Swagger2 JSON/YAML、HAR 并预览集合、请求及环境数量，不写入数据。',z.object({text:z.string().max(20*1024*1024),localFiles:z.record(z.string(),z.string()).optional()}).strict(),'previewImport',true],
-  ['api_import','导入工作区备份、Postman Collection v2.1、环境 JSON、单条 cURL、OpenAPI3/Swagger2 JSON/YAML 或 HAR（localFiles 仅来自用户选择的依赖文件）；工作区以新增副本方式原子导入。',z.object({text:z.string().max(20*1024*1024),localFiles:z.record(z.string(),z.string()).optional()}).strict(),'import',false],
+  ['api_import_preview','验证工作区备份或 Postman/cURL、OpenAPI3/Swagger2 JSON/YAML、HAR 并预览集合、请求及环境数量，不写入数据。',importInput,'previewImport',true],
+  ['api_import','导入工作区备份、Postman Collection v2.1、环境 JSON、单条 cURL、OpenAPI3/Swagger2 JSON/YAML 或 HAR（localFiles 仅来自用户选择的依赖文件）；工作区以新增副本方式原子导入。',importInput,'import',false],
+  ['api_import_interactive','App 专用：cURL 返回临时请求，其他格式沿用原有导入行为。',importInput,'importInteractive',false,'app'],
   ['api_export','导出 Postman 文档或请求 cURL；敏感值和 Keychain 引用始终排除。',z.object({kind,id,format:z.enum(['postman','curl']).optional(),itemId:id.optional()}).strict(),'export',true],
   ['api_file_upload','接收用户选择的文件，以 base64 保存为本地附件，返回可用于 file/formdata 的路径，最大 20 MB。',z.object({name:z.string().min(1),base64:z.string().max(28*1024*1024)}).strict(),'upload',false],
   ['api_graphql_introspect','用户显式发送 GraphQL schema introspection；沿用保存请求的 URL、认证、环境、脚本和网络设置，返回可取消的 runId，不修改请求体。',z.object({collectionId:id,itemId:id,environmentId:id.optional()}).strict(),'graphqlIntrospect',false],
   ['api_run_start','从本机执行 HTTP 请求或集合，运行脚本并返回 runId。可指定 itemId、environmentId、JSON/CSV 数据及选项。请求会实际影响目标服务。',z.object({collectionId:id,itemId:id.optional(),environmentId:id.optional(),data:z.array(object).optional(),dataText:z.string().optional(),dataFormat:z.enum(['json','csv']).optional(),options:options.optional()}).strict(),'start',false],
+  ['api_run_draft','App 专用：显式运行单个临时 HTTP 请求或 GraphQL schema introspection，返回 runId。请求会实际影响目标服务。',z.object({item:object,environmentId:id.optional(),introspect:z.boolean().optional()}).strict(),'runDraft',false,'app'],
   ['api_run_result','按 runId 读取状态、断言、日志和变量变化。默认排除响应正文；仅在需要分析正文时使用 includeBodies=true。',z.object({runId:id,includeBodies:z.boolean().optional()}).strict(),'result',true],
   ['api_run_cancel','取消指定 runId 的运行。',z.object({runId:id}).strict(),'cancel',false],
 ];
