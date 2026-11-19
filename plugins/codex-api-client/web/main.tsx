@@ -126,7 +126,7 @@ function App(){
     const current=latest.current.tab;
     if(!current?.temporary)return save(current);
     if(startLock.current||results[current.key]?.status==='running')return;
-    setDraftDestination({collectionId:state.collections[0]?.id||'new',parentId:'',name:''});
+    setDraftDestination({collectionId:state.collections[0]?.id||'',parentId:'',name:''});
     setModal('save-draft');
   }
   async function save(current=tab):Promise<Doc|undefined>{
@@ -151,7 +151,7 @@ function App(){
       const item=nodeOf(current),snapshot=JSON.stringify(item);
       const {collectionId,parentId,name}=draftDestination;
       if(!item?.name?.trim())throw Error('请输入请求名称');
-      const isNew=collectionId==='new';
+      const isNew=collectionId==='';
       if(isNew&&!name.trim())throw Error('请输入集合名称');
       if(!isNew)await saves.current.get('collection:'+collectionId);
       const destination=isNew?null:await call<Doc>('api_document_get',{kind:'collection',id:collectionId});
@@ -459,15 +459,15 @@ function App(){
       <form onSubmit={e=>{e.preventDefault();safe(saveDraft);}}>
         <label>目标集合<select aria-label="目标集合" value={draftDestination.collectionId} disabled={changingStructure} onChange={e=>setDraftDestination({...draftDestination,collectionId:e.target.value,parentId:''})}>
           {state.collections.map(doc=><option key={doc.id} value={doc.id}>{doc.data.info.name}</option>)}
-          <option value="new">新建集合</option>
+          <option value="">新建集合</option>
         </select></label>
-        {draftDestination.collectionId==='new'
+        {draftDestination.collectionId===''
           ?<label>集合名称<input aria-label="集合名称" value={draftDestination.name} disabled={changingStructure} onChange={e=>setDraftDestination({...draftDestination,name:e.target.value})}/></label>
           :<label>目标文件夹<select aria-label="目标文件夹" value={draftDestination.parentId} disabled={changingStructure} onChange={e=>setDraftDestination({...draftDestination,parentId:e.target.value})}>
             <option value="">集合根目录</option>
             {folders(state.collections.find(doc=>doc.id===draftDestination.collectionId)?.data||{}).map(folder=><option key={folder.id} value={folder.id}>{folder.path}</option>)}
           </select></label>}
-        <footer><button type="button" disabled={changingStructure} onClick={()=>setModal('')}>取消</button><button className="primary" disabled={changingStructure||(draftDestination.collectionId==='new'&&!draftDestination.name.trim())}>确认保存</button></footer>
+        <footer><button type="button" disabled={changingStructure} onClick={()=>setModal('')}>取消</button><button className="primary" disabled={changingStructure||(draftDestination.collectionId===''&&!draftDestination.name.trim())}>确认保存</button></footer>
       </form>
     </Modal>}
     {modal==='move'&&<Modal title="移动或排序" onClose={()=>setModal('')}><label>目标文件夹<select aria-label="目标文件夹" value={moveTarget} onChange={e=>setMoveTarget(e.target.value)}><option value="">集合根目录</option>{folders((dialogTarget!).doc.data).filter((f:any)=>f.id!==dialogTarget?.itemId&&!findItem(nodeOf(dialogTarget),f.id)).map((f:any)=><option key={f.id} value={f.id}>{f.path}</option>)}</select></label><label>插入位置（从 0 开始）<input type="number" min={0} value={movePosition} onChange={e=>setMovePosition(Number(e.target.value))}/></label><footer><button className="primary" onClick={()=>safe(()=>treeAction('move',dialogTarget))}>确认移动</button></footer></Modal>}

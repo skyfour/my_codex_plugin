@@ -90,6 +90,7 @@ test('keyboard save adds the cURL draft to the selected existing folder',async({
   const collectionName='cURL 临时请求已有集合';
   const collection=await api(page,'api_document_put',{
     kind:'collection',
+    id:'new',
     revision:0,
     data:{info:{name:collectionName},item:[{name:'接收文件夹',item:[]},{name:'保留的原请求',request:{method:'GET',url:fixture+'/original'}}]}
   });
