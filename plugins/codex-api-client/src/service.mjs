@@ -1,4 +1,4 @@
-import {validateSettings} from './document-validation.mjs';
+import {validateDocument,validateSettings} from './document-validation.mjs';
 import {ProtocolSessions} from './protocol-sessions.mjs';
 import {webAdapters,validateWebConfig} from './protocol-web.mjs';
 import {grpcAdapter,grpcDefinition} from './protocol-grpc.mjs';
@@ -146,15 +146,17 @@ export class ApiService {
     return this.store.put(kind,id,data,revision);
   }
   async remove({kind,id,revision}) { assertKind(kind); return this.store.remove(kind,id,revision); }
-  async import({text,localFiles}) {
-    const {kind,data,warnings}=await importDocument(text,{localFiles});
+  async import({text,localFiles},interactive=false) {
+    const {kind,source,data,warnings}=await importDocument(text,{localFiles});
+    if(interactive&&source==='curl')return {draft:{kind,id:randomUUID(),revision:0,data:markCredentials(data)},warnings};
     if(kind==='workspace')return this.importWorkspace(data);
     return {document:await this.put({kind,data}),warnings};
   }
+  importInteractive(args){return this.import(args,true);}
   async previewImport({text,localFiles}) {
     const imported=await importDocument(text,{localFiles});
     if(imported.kind==='workspace')return {...workspacePreview(imported.data),warnings:imported.warnings};
-    return {kind:imported.kind,collectionCount:imported.kind==='collection'?1:0,environmentCount:imported.kind==='environment'?1:0,warnings:imported.warnings,...(imported.kind==='collection'?collectionPreview(imported.data):{})};
+    return {kind:imported.kind,...(imported.source==='curl'?{source:imported.source}:{}),collectionCount:imported.kind==='collection'?1:0,environmentCount:imported.kind==='environment'?1:0,warnings:imported.warnings,...(imported.kind==='collection'?collectionPreview(imported.data):{})};
   }
   async exportWorkspace() {
     const collections=await this.store.list('collection'),environments=await this.store.list('environment');
@@ -231,12 +233,22 @@ export class ApiService {
   async graphqlIntrospect({collectionId,itemId,environmentId}) {
     return this.start({collectionId,itemId,environmentId},true);
   }
-  async start({collectionId,itemId,environmentId,data=[],dataText,dataFormat='json',options={}},introspect=false) {
+  async runDraft({item,environmentId,introspect=false}) {
+    if(!item||typeof item!=='object'||Array.isArray(item)||item.item!==undefined||!item.request||typeof item.request!=='object'||Array.isArray(item.request)){
+      throw new Error('INVALID_DOCUMENT: 临时运行仅支持单个请求');
+    }
+    if(Buffer.byteLength(json(item),'utf8')>TRANSFER_LIMIT)throw new Error('RUN_LIMIT: 临时请求超过 20 MB');
+    const collection=markCredentials(normalizeCollection({info:{name:'临时请求'},item:[item]}));
+    validateDocument('collection',collection);
+    return this.start({itemId:collection.item[0].id,environmentId},introspect,collection);
+  }
+  async start({collectionId,itemId,environmentId,data=[],dataText,dataFormat='json',options={}},introspect=false,draftCollection) {
     const settingsDoc=await this.store.get('settings','default',{reveal:true});
     const settings=settingsDoc?.data||{};
     options={...DEFAULT_SETTINGS,...settings,...options};validateOptions(options);
     if(this.active.size>=4)throw new Error('RUN_LIMIT: 同时最多运行 4 个集合');
-    const collectionDoc=await this.store.get('collection',collectionId,{reveal:true});if(!collectionDoc)throw new Error('NOT_FOUND');
+    const collectionDoc=draftCollection?{data:draftCollection}:await this.store.get('collection',collectionId,{reveal:true});
+    if(!collectionDoc)throw new Error('NOT_FOUND');
     const environmentDoc=environmentId?await this.store.get('environment',environmentId,{reveal:true}):null;
     if(environmentId&&!environmentDoc)throw new Error('NOT_FOUND: 环境不存在');
     const globalsDoc=await this.store.get('globals','default',{reveal:true});
@@ -265,7 +277,7 @@ export class ApiService {
     for(const [doc,scope]of [[environmentDoc,'environment'],[globalsDoc,'globals'],[collectionDoc,'collectionVariables']])if(doc)await transformSecrets(doc.data,v=>{secretKeys[scope].push(v.key);return v;});
     const resolved=async d=>transformSecrets(d||{},v=>{delete v.secretRef;v.type='string';delete v.sensitive;return v;});
     // Runtime-only identity uses document IDs: restored copies may share Postman collection IDs.
-    collection.info._postman_id=collectionId;
+    if(collectionId)collection.info._postman_id=collectionId;
     const input={workspace:await Promise.all(workspace.map(d=>resolved({...d.data,info:{...d.data.info,_postman_id:d.id}}))),collection:await resolved(collection),environment:await resolved(environmentDoc?.data),globals:await resolved(globalsDoc?.data),cookies:await resolved(cookiesDoc?.data),data,options:materializeNetwork(options),secretKeys,collectionSecretKeys};
     const run={id:randomUUID(),status:'running',name:collection.info.name,collectionId,itemId,environmentId,createdAt:new Date().toISOString(),responses:[],assertions:[],logs:[],errors:[],variableChanges:[]};
     const controller=new AbortController();this.store.saveRun(run);
@@ -285,7 +297,7 @@ export class ApiService {
       try {
         await this.persistScope('environment',environmentId,environmentDoc,result.environment?.values,run,additional);
         await this.persistScope('globals','default',globalsDoc,result.globals?.values,run,additional);
-        await this.persistScope('collection',collectionId,collectionDoc,result.collectionVariables,run,additional);
+        if(!draftCollection)await this.persistScope('collection',collectionId,collectionDoc,result.collectionVariables,run,additional);
         if(result.cookies) {
           additional.push(...(result.cookies.cookies||[]).map(c=>c.value));
           try { await this.store.put('cookies','default',result.cookies,cookiesDoc?.revision||0); }
