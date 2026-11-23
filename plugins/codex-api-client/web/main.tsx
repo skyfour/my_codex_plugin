@@ -15,7 +15,7 @@ import {ImportPreview} from './ImportPreview';
 import {SettingsPanel} from './SettingsPanel';
 import {BrandIcon} from './BrandIcon';
 import {EnvironmentPicker} from './EnvironmentPicker';
-import {AuthEditor,Rows,Modal,type Row} from './components';
+import {AuthEditor,Rows,Modal,useDialogFocus,type Row} from './components';
 import {findItem,moveItem,compatibilityMode} from '../src/collections.mjs';
 import './style.css';
 
@@ -23,7 +23,9 @@ type Doc={kind:string,id:string,revision:number,data:any};
 type Tab={key:string,doc:Doc,itemId?:string,dirty:boolean,temporary?:boolean};
 type DropPosition='before'|'after'|'inside';
 type TreeChange='tree'|'request-drag'|'request-save';
+type Pane='request'|'response';
 const requestDragType='application/x-codex-api-request';
+const blockingDialog='[role=dialog]:not(.pane-popup, [inert] *)';
 type State={collections:Doc[],environments:Doc[],globals:Doc|null,settings:Doc|null,cookies:Doc|null,history:any[],defaults:any};
 const empty:State={collections:[],environments:[],globals:null,settings:null,cookies:null,history:[],defaults:{}};
 const uid=()=>crypto.randomUUID();
@@ -53,6 +55,8 @@ function App(){
   useEffect(()=>{localStorage.setItem('api-collapsed',JSON.stringify(collapsed));},[collapsed]);
   const toggle=(key:string)=>setCollapsed(v=>({...v,[key]:!v[key]}));
   const [sidebar,setSidebar]=useState(260),[split,setSplit]=useState(54),[ready,setReady]=useState(false);
+  const [expandedPane,setExpandedPane]=useState<Pane|null>(null),[popupPane,setPopupPane]=useState<Pane|null>(null);
+  const popupDialog=useRef<HTMLElement>(null),popupTrigger=useRef<HTMLButtonElement>(null);
   const tab=tabs.find(t=>t.key===active),node=nodeOf(tab),request=node?.request;
   const result=results[active]||null;
   const setResult=(value:any,key=active)=>setResults(all=>({...all,[key]:value}));
@@ -64,10 +68,18 @@ function App(){
   const dialogTarget=actionTarget||tab;
   const protocol=request?.['x-codex-api-client']?.protocol;
   const showResponse=!protocol&&(!!request||!!result);
+  const popup=tab&&!protocol?popupPane:null;
+  const paneView=popup||expandedPane;
+  useDialogFocus(popupDialog,()=>setPopupPane(null),!!popup,popupTrigger);
+  function openPanePopup(pane:Pane,trigger:HTMLButtonElement){
+    popupTrigger.current=trigger;
+    setMenu(null);
+    setPopupPane(pane);
+  }
   function targetOf(doc:Doc,itemId?:string):Tab{const draft=latest.current.tabs.find(t=>t.doc.kind===doc.kind&&t.doc.id===doc.id);return {key:`${doc.kind}:${doc.id}:${itemId||'root'}`,doc:draft?.doc||doc,itemId,dirty:draft?.dirty||false};}
   function rowMenu(e:React.MouseEvent,doc:Doc,itemId?:string){e.preventDefault();const r=e.currentTarget.getBoundingClientRect();setMenu({target:targetOf(doc,itemId),x:e.type==='contextmenu'?e.clientX:r.right,y:e.type==='contextmenu'?e.clientY:r.bottom+4});}
   const latest=useRef({tab,tabs});latest.current={tab,tabs};
-  function activateTab(next:Tab|undefined){setActive(next?.key||'');setEditorTab(next?(editorViews.current.get(next.key)||(next.doc.kind!=='collection'?'变量':nodeOf(next)?.request?'参数':'概览')):'参数');setScriptStage(next?scriptViews.current.get(next.key)||'prerequest':'prerequest');}
+  function activateTab(next:Tab|undefined){if(next?.key!==active){setExpandedPane(null);setPopupPane(null);}setActive(next?.key||'');setEditorTab(next?(editorViews.current.get(next.key)||(next.doc.kind!=='collection'?'变量':nodeOf(next)?.request?'参数':'概览')):'参数');setScriptStage(next?scriptViews.current.get(next.key)||'prerequest':'prerequest');}
   const safe=async(fn:()=>Promise<any>)=>{setError('');try{return await fn();}catch(e){setError(e instanceof Error?e.message:String(e));return undefined;}};
   const preferencesHydrated=useRef(false),savedPreferences=useRef(''),preferenceWrites=useRef(Promise.resolve());
   async function persistPreferences(preferences:any){
@@ -103,7 +115,7 @@ function App(){
   useEffect(()=>{if(ready)localStorage.setItem('api-environment',environment);},[environment,ready]);
   useEffect(()=>{if(ready&&environment&&!state.environments.some(e=>e.id===environment))setEnvironment('');},[ready,state.environments,environment]);
   useEffect(()=>{const before=(e:BeforeUnloadEvent)=>{if(latest.current.tabs.some(t=>t.dirty)){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',before);return()=>window.removeEventListener('beforeunload',before);},[]);
-  useEffect(()=>{const key=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();if(!structureBusy.current&&!document.querySelector('[role=dialog]'))safe(requestSave);}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);});
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{if((e.metaKey||e.ctrlKey)&&e.key==='s'){e.preventDefault();if(paneView!=='response'&&!structureBusy.current&&!document.querySelector(blockingDialog))safe(requestSave);}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);});
   const runningIds=Object.entries(results).filter(([,r])=>r.status==='running').map(([key,r])=>[key,r.id]);
   useEffect(()=>{
     if(!runningIds.length)return;
@@ -263,7 +275,7 @@ function App(){
       setResponseIndex(0);setResponseTab('正文');setModal('');
     }finally{startLock.current=false;setBusy(false);}
   }
-  useEffect(()=>{const key=(e:KeyboardEvent)=>{if(!(e.metaKey||e.ctrlKey)||e.isComposing||document.querySelector('[role=dialog]'))return;if(e.key==='Enter'&&request&&!busy&&!running){e.preventDefault();if(!e.repeat&&rawUrl(request).trim())safe(()=>start());}else if(e.key.toLowerCase()==='k'){e.preventDefault();setSidebarOpen(true);setSection('collections');requestAnimationFrame(()=>collectionSearchInput.current?.focus());}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);});
+  useEffect(()=>{const key=(e:KeyboardEvent)=>{if(!(e.metaKey||e.ctrlKey)||e.isComposing||document.querySelector(blockingDialog))return;if(e.key==='Enter'&&paneView!=='response'&&request&&!busy&&!running){e.preventDefault();if(!e.repeat&&rawUrl(request).trim())safe(()=>start());}else if(e.key.toLowerCase()==='k'&&!popup){e.preventDefault();setSidebarOpen(true);setSection('collections');requestAnimationFrame(()=>collectionSearchInput.current?.focus());}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);});
   async function introspectGraphql(){
     const current=latest.current.tab;if(!current?.itemId)throw Error('请先选择 GraphQL 请求');
     const environmentId=environment||undefined;
@@ -401,28 +413,57 @@ function App(){
   if(selectedEnvironment)addVariables(draftData('environment',selectedEnvironment.id,selectedEnvironment.data).values,'环境：'+selectedEnvironment.data.name);
   if(tab?.itemId&&variableCollection&&compatibilityMode(variableCollection)==='extended')for(const parent of findItem(variableCollection||tab.doc.data,tab.itemId)?.parents||[])addVariables(parent.variable,'文件夹：'+parent.name);
   const running=result?.status==='running';
+  function paneControls(pane:Pane){
+    const label=pane==='request'?'请求区':'响应区';
+    const isPopup=popup===pane,expanded=expandedPane===pane;
+    const opposite=pane==='request'?'response':'request';
+    return <div className="pane-controls">
+      {!popup&&expanded&&showResponse&&<button type="button" onClick={()=>{
+        setExpandedPane(opposite);
+        requestAnimationFrame(()=>document.querySelector<HTMLButtonElement>(`.${opposite}-pane [aria-label="恢复分屏"]`)?.focus({preventScroll:true}));
+      }}>{opposite==='request'?'查看请求':'查看响应'}</button>}
+      {!popup&&<button type="button" aria-label={expanded?(showResponse?'恢复分屏':'还原请求区'):'展开'+label} onClick={()=>setExpandedPane(expanded?null:pane)}>{expanded?(showResponse?'恢复分屏':'还原'):'展开'}</button>}
+      <button type="button" data-dialog-focus={isPopup||undefined} aria-label={isPopup?'关闭弹窗':'弹窗查看'+(pane==='request'?'请求':'响应')} onClick={e=>isPopup?setPopupPane(null):openPanePopup(pane,e.currentTarget)}>{isPopup?'关闭弹窗':'弹窗'}</button>
+    </div>;
+  }
+  function paneProps(pane:Pane){
+    const isPopup=popup===pane;
+    return {hidden:!!paneView&&paneView!==pane,ref:isPopup?popupDialog:undefined,role:isPopup?'dialog':undefined,'aria-modal':isPopup||undefined,'aria-label':isPopup?(pane==='request'?'请求区':'响应区'):undefined,tabIndex:isPopup?-1:undefined,className:pane+'-pane'+(isPopup?' pane-popup':'')};
+  }
 
   return <div className="app-shell">
-    <header className="app-header"><div className="brand"><span className="brand-mark"><BrandIcon/></span><b>API Client</b><span className="local-badge">LOCAL</span></div><div className="header-actions"><span className="connection"><i/>{ready?'本地工作区':'连接中…'}</span><button aria-label="切换主题" onClick={()=>setTheme(theme==='light'?'dark':'light')}>{theme==='light'?'☾':'☀'}</button><button onClick={()=>{setSettingsRevision(state.settings?.revision||0);setSettingsText(stringify({...state.defaults,...state.settings?.data}));setModal('settings');}}>设置</button></div></header>
-    <div className="workspace-toolbar"><button className="sidebar-toggle" aria-label={sidebarOpen?'收起集合侧栏':'展开集合侧栏'} aria-expanded={sidebarOpen} onClick={()=>setSidebarOpen(v=>!v)}>☰<span>侧栏</span></button><EnvironmentPicker environments={state.environments} globals={state.globals} value={environment} onSelect={setEnvironment} onEdit={doc=>open(doc as Doc)} onCreate={()=>safe(newEnvironment)} onImport={()=>{setImportWarnings([]);setImportFiles({});setModal('import');}} onGlobals={()=>safe(globalVars)}/><span className="workspace-toolbar-note">工作区环境</span></div>
+    <header className="app-header" inert={!!popup}>
+      <div className="brand"><span className="brand-mark"><BrandIcon/></span><b>API Client</b></div>
+      <div className="workspace-toolbar">
+        <button className="sidebar-toggle" aria-label={sidebarOpen?'收起集合侧栏':'展开集合侧栏'} aria-expanded={sidebarOpen} onClick={()=>setSidebarOpen(v=>!v)}>☰<span>侧栏</span></button>
+        <EnvironmentPicker environments={state.environments} globals={state.globals} value={environment} onSelect={setEnvironment} onEdit={doc=>open(doc as Doc)} onCreate={()=>safe(newEnvironment)} onImport={()=>{setImportWarnings([]);setImportFiles({});setModal('import');}} onGlobals={()=>safe(globalVars)}/>
+      </div>
+      <div className="header-actions">
+        <span className="connection" title={ready?'本地工作区':'连接中…'}><i aria-hidden="true"/><span>{ready?'本地工作区':'连接中…'}</span></span>
+        <button aria-label="切换主题" onClick={()=>setTheme(theme==='light'?'dark':'light')}>{theme==='light'?'☾':'☀'}</button>
+        <button onClick={()=>{setSettingsRevision(state.settings?.revision||0);setSettingsText(stringify({...state.defaults,...state.settings?.data}));setModal('settings');}}>设置</button>
+      </div>
+    </header>
     <div className={"workspace"+(sidebarOpen?"":" sidebar-hidden")} style={{gridTemplateColumns:`${sidebar}px 5px 1fr`}}>
-      <aside className="sidebar" hidden={!sidebarOpen}><div className="workspace-title"><span>我的工作区</span><button aria-label="刷新工作区" onClick={()=>safe(refresh)}>↻</button></div><div className="side-nav">{[['collections','集合'],['history','历史']].map(([key,label])=><button key={key} className={section===key?'active':''} onClick={()=>setSection(key)}>{label}</button>)}</div>
+      <aside className="sidebar" hidden={!sidebarOpen} inert={!!popup}><div className="workspace-title"><span>我的工作区</span><button aria-label="刷新工作区" onClick={()=>safe(refresh)}>↻</button></div><div className="side-nav">{[['collections','集合'],['history','历史']].map(([key,label])=><button key={key} className={section===key?'active':''} onClick={()=>setSection(key)}>{label}</button>)}</div>
       <div className="side-tools">{section==='collections'?<><button onClick={()=>safe(newCollection)}>＋ 新建集合</button><button onClick={()=>{setImportWarnings([]);setImportFiles({});setModal('import');}}>导入</button><button onClick={()=>setModal('export-workspace')}>导出全部</button><button onClick={()=>setModal('backup')}>完整备份与恢复</button></>:<span className="muted">最近 100 次运行</span>}</div>
       <div className="collection-search"><input ref={collectionSearchInput} aria-label="搜索集合和请求" placeholder="搜索名称、URL…" value={collectionSearch} onChange={e=>setCollectionSearch(e.target.value)} onKeyDown={e=>{if(e.key==='Escape'){setCollectionSearch('');e.currentTarget.blur();}}}/>{collectionSearch&&<button aria-label="清空集合搜索" onClick={()=>{setCollectionSearch('');collectionSearchInput.current?.focus();}}>×</button>}</div><div className="side-scroll">{section==='collections'&&<>{!state.collections.length&&<div className="side-empty">创建一个集合，<br/>开始整理你的 API。</div>}{state.collections.filter(doc=>matchesTree(doc.data)).map(doc=><div className="collection" key={doc.id}><div {...treeDropProps(doc)} onContextMenu={e=>rowMenu(e,doc)} className={'collection-head '+(active===`collection:${doc.id}:root`?'selected':'')}><button className="tree-toggle" aria-label={(collapsed[doc.id]?'展开 ':'收起 ')+doc.data.info.name} aria-expanded={!collapsed[doc.id]} onClick={()=>toggle(doc.id)}><TreeIcon name={collapsed[doc.id]?'right':'down'}/></button><TreeIcon name="collection"/><button className="tree-name" onClick={()=>{toggle(doc.id);open(doc);}}>{doc.data.info.name}</button><small>{countRequests(doc.data)}</small>{menuButton(doc)}</div>{(treeQuery||!collapsed[doc.id])&&renderTree(doc,doc.data.item,0,doc.data.info.name.toLocaleLowerCase().includes(treeQuery))}</div>)}</>}
       {section==='collections'&&treeQuery&&!state.collections.some(doc=>matchesTree(doc.data))&&<div className="side-empty">没有匹配的集合或请求</div>}{section==='history'&&state.history.filter(h=>!treeQuery||h.name.toLocaleLowerCase().includes(treeQuery)).map(h=><button className="history-row" key={h.id} onClick={()=>safe(async()=>{const value=await call('api_run_result',{runId:h.id,includeBodies:true});setResponseIndex(0);const doc=state.collections.find(c=>c.id===value.collectionId);if(doc){const itemId=value.itemId&&findItem(doc.data,value.itemId)?value.itemId:undefined;setResult(value,`collection:${doc.id}:${itemId||'root'}`);open(doc,itemId);}else{setHistoryResult(value);setModal('history');}})}><span className={'run-dot '+h.status}/><span><b>{h.name}</b><small>{new Date(h.createdAt).toLocaleString('zh-CN')} · {h.responses} 个响应</small></span><small>{h.failed?'失败 '+h.failed:h.status==='running'?'运行中':'查看'}</small></button>)}
       </div><footer className="sidebar-footer"><i/>数据保存在本机<span>v0.3</span></footer></aside>
-      <div className="vertical-handle" hidden={!sidebarOpen} role="separator" aria-label="调整侧栏宽度" onPointerDown={e=>resize(e,'sidebar')}/>
-      <main className="main"><div className="request-tabs">{tabs.map(t=><div key={t.key} className={'request-tab '+(t.key===active?'active':'')}><button onClick={()=>{activateTab(t);}}><span className="tab-method">{nodeOf(t)?.request?.method||'◈'}</span>{titleOf(t)}{t.dirty&&<span className="dirty-dot"/>}</button><button aria-label={'关闭 '+titleOf(t)} onClick={()=>{const close=()=>{setTabs(all=>all.filter(v=>v.key!==t.key));if(active===t.key){const next=tabs.find(v=>v.key!==t.key);activateTab(next);}};t.dirty?ask(t.temporary?'关闭后将丢弃此未保存的请求。':'此集合或环境有未保存修改。关闭最后一个相关标签会丢失修改；其他相关标签仍会保留草稿。',close):close();}}>×</button></div>)}<button className="add-tab" aria-label="新建请求标签" onClick={()=>safe(()=>newItem())}>＋</button></div>
-      {(error||notice)&&<div className={'message '+(error?'error':'success')} role={error?'alert':'status'}><span>{error||notice}</span>{!tab?.temporary&&error.includes('CONFLICT')&&<button onClick={()=>ask('重新加载会丢弃此集合或环境所有标签的未保存修改。',()=>safe(reloadCurrent))}>重新加载当前内容</button>}<button aria-label="关闭提示" onClick={()=>{setError('');setNotice('');}}>×</button></div>}
+      <div className="vertical-handle" hidden={!sidebarOpen} inert={!!popup} role="separator" aria-label="调整侧栏宽度" onPointerDown={e=>resize(e,'sidebar')}/>
+      <main className="main"><div className="request-tabs" inert={!!popup}>{tabs.map(t=><div key={t.key} className={'request-tab '+(t.key===active?'active':'')}><button onClick={()=>{activateTab(t);}}><span className="tab-method">{nodeOf(t)?.request?.method||'◈'}</span>{titleOf(t)}{t.dirty&&<span className="dirty-dot"/>}</button><button aria-label={'关闭 '+titleOf(t)} onClick={()=>{const close=()=>{setTabs(all=>all.filter(v=>v.key!==t.key));if(active===t.key){const next=tabs.find(v=>v.key!==t.key);activateTab(next);}};t.dirty?ask(t.temporary?'关闭后将丢弃此未保存的请求。':'此集合或环境有未保存修改。关闭最后一个相关标签会丢失修改；其他相关标签仍会保留草稿。',close):close();}}>×</button></div>)}<button className="add-tab" aria-label="新建请求标签" onClick={()=>safe(()=>newItem())}>＋</button></div>
+      {!popup&&(error||notice)&&<div className={'message '+(error?'error':'success')} role={error?'alert':'status'}><span>{error||notice}</span>{!tab?.temporary&&error.includes('CONFLICT')&&<button onClick={()=>ask('重新加载会丢弃此集合或环境所有标签的未保存修改。',()=>safe(reloadCurrent))}>重新加载当前内容</button>}<button aria-label="关闭提示" onClick={()=>{setError('');setNotice('');}}>×</button></div>}
       {tabs.filter(t=>nodeOf(t)?.request?.['x-codex-api-client']?.protocol).map(t=><ProtocolClient key={t.key} visible={t.key===active} request={nodeOf(t).request} collectionId={t.doc.id} itemId={t.itemId!} environmentId={environment} onSave={async()=>{
         if(structureBusy.current)throw Error('集合正在更新，请稍后重试');
         return save(latest.current.tabs.find(v=>v.key===t.key));
       }} onChange={patch=>edit(n=>patch(n.request))}/>)}
       {tab&&!protocol?<div className="editor-workspace" inert={changingStructure} aria-busy={changingStructure}>
-        <div className="editor-top"><div className="breadcrumb">{tab.temporary?'临时请求':tab.doc.kind==='collection'?'集合':tab.doc.kind==='globals'?'全局变量':'环境'}<span>/</span>{titleOf(tab)}{tab.dirty&&<small>未保存</small>}</div></div>
-        <div className={"panes "+(!showResponse?"document-panes":"")}><section className="request-pane" style={{height:showResponse?split+'%':'100%'}}>
-        <div className="name-row"><input aria-label="名称" className="name-input" value={node?.info?.name||node?.name||(tab.doc.kind==='globals'?'全局变量':'')} onChange={e=>edit(n=>{if(n.info)n.info.name=e.target.value;else n.name=e.target.value;})}/><div className="editor-controls"><button title="保存修改（⌘ / Ctrl + S）" disabled={tab.temporary&&(busy||running)} onClick={()=>safe(requestSave)}>保存</button>{!tab.temporary&&<button aria-label="更多操作" onClick={()=>{setActionTarget(undefined);setModal('actions');}}>•••</button>}</div>{tab.doc.kind==='collection'&&!request&&<div className="inline-actions"><button onClick={()=>safe(()=>newItem())}>新建请求</button><button onClick={()=>safe(()=>newItem(true))}>新建文件夹</button>{!request&&<button className="primary" onClick={()=>{setActionTarget(undefined);setModal('runner');}}>{tab.itemId?'运行文件夹':'运行集合'}</button>}</div>}</div>
-        {request&&<div className="url-bar"><select aria-label="请求协议" value="http" disabled={tab.temporary} title={tab.temporary?'保存到集合后可更改协议':undefined} onChange={e=>edit(n=>{n.request['x-codex-api-client']={...n.request['x-codex-api-client'],protocol:{version:1,type:e.target.value}};})}><option value="http">HTTP</option><option value="sse">SSE</option><option value="websocket">WebSocket</option><option value="socketio">Socket.IO</option><option value="grpc">gRPC</option><option value="mqtt">MQTT</option><option value="mcp">MCP</option></select><select aria-label="请求方法" value={request.method||'GET'} onChange={e=>edit(n=>{n.request.method=e.target.value;})}>{['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(m=><option key={m}>{m}</option>)}</select><UrlInput variables={variableValues} value={rawUrl(request)} onChange={value=>edit(n=>{n.request.url=value;delete n.request._query;})}/>{running?<button className="danger" onClick={()=>safe(()=>call('api_run_cancel',{runId:result.id}))}>取消</button>:<button aria-label="发送" title="发送请求（⌘ / Ctrl + Enter）" className="primary" disabled={busy||!rawUrl(request)} onClick={()=>safe(()=>start())}>发送<span>↗</span></button>}</div>}
+        <div className="editor-top" hidden={!!paneView}><div className="breadcrumb">{tab.temporary?'临时请求':tab.doc.kind==='collection'?'集合':tab.doc.kind==='globals'?'全局变量':'环境'}<span>/</span>{titleOf(tab)}{tab.dirty&&<small>未保存</small>}</div></div>
+        <div className={"panes "+(!showResponse?"document-panes":"")} data-pane-view={paneView||undefined}>
+        {popup&&<div className="pane-backdrop" aria-hidden="true" onClick={()=>setPopupPane(null)}/>}
+        <section {...paneProps('request')} style={{height:paneView?undefined:showResponse?split+'%':'100%'}}>
+        <div className="name-row"><input aria-label="名称" className="name-input" value={node?.info?.name||node?.name||(tab.doc.kind==='globals'?'全局变量':'')} onChange={e=>edit(n=>{if(n.info)n.info.name=e.target.value;else n.name=e.target.value;})}/>{paneView&&tab.dirty&&<small className="unsaved-label">未保存</small>}<div className="editor-controls"><button title="保存修改（⌘ / Ctrl + S）" disabled={tab.temporary&&(busy||running)} onClick={()=>safe(requestSave)}>保存</button>{!tab.temporary&&<button aria-label="更多操作" onClick={()=>{setActionTarget(undefined);setModal('actions');}}>•••</button>}{(request||editorTab==='脚本'||paneView==='request')&&paneControls('request')}</div>{tab.doc.kind==='collection'&&!request&&<div className="inline-actions"><button onClick={()=>safe(()=>newItem())}>新建请求</button><button onClick={()=>safe(()=>newItem(true))}>新建文件夹</button>{!request&&<button className="primary" onClick={()=>{setActionTarget(undefined);setModal('runner');}}>{tab.itemId?'运行文件夹':'运行集合'}</button>}</div>}</div>
+        {request&&<div className="url-bar"><select aria-label="请求协议" value="http" disabled={tab.temporary} title={tab.temporary?'保存到集合后可更改协议':undefined} onChange={e=>{setPopupPane(null);setExpandedPane(null);edit(n=>{n.request['x-codex-api-client']={...n.request['x-codex-api-client'],protocol:{version:1,type:e.target.value}};});}}><option value="http">HTTP</option><option value="sse">SSE</option><option value="websocket">WebSocket</option><option value="socketio">Socket.IO</option><option value="grpc">gRPC</option><option value="mqtt">MQTT</option><option value="mcp">MCP</option></select><select aria-label="请求方法" value={request.method||'GET'} onChange={e=>edit(n=>{n.request.method=e.target.value;})}>{['GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS'].map(m=><option key={m}>{m}</option>)}</select><UrlInput variables={variableValues} value={rawUrl(request)} onChange={value=>edit(n=>{n.request.url=value;delete n.request._query;})}/>{running?<button className="danger" onClick={()=>safe(()=>call('api_run_cancel',{runId:result.id}))}>取消</button>:<button aria-label="发送" title="发送请求（⌘ / Ctrl + Enter）" className="primary" disabled={busy||!rawUrl(request)} onClick={()=>safe(()=>start())}>发送<span>↗</span></button>}</div>}
         <nav className="editor-nav">{(tab.doc.kind!=='collection'?['变量']:request?['参数','认证','请求头','请求体','脚本','网络']:['概览','认证','脚本','变量']).map(label=><button key={label} aria-label={label} className={editorTab===label?'active':''} onClick={()=>{setEditorTab(label);editorViews.current.set(active,label);}}>{label}{label==='请求头'&&request?.header?.length>0&&<small>{request.header.length}</small>}</button>)}</nav>
         <div className="editor-content" key={tab.key+':'+editorTab}>
           {editorTab==='概览'&&<div className="overview"><div className="overview-heading"><TreeIcon name="collection"/><div><b>{tab.itemId?'文件夹概览':'集合概览'}</b><p className="muted">组织接口请求，共享认证、变量和脚本。</p></div></div><label>描述<textarea aria-label="描述" rows={4} value={typeof (node.info?.description??node.description)==='string'?(node.info?.description??node.description):(node.info?.description??node.description)?.content||''} onChange={e=>edit(n=>{if(n.info)n.info.description=e.target.value;else n.description=e.target.value;})}/></label>{!tab.itemId&&<label>兼容模式<select aria-label="集合兼容模式" value={compatibilityMode(node)} onChange={e=>edit(n=>{n['x-codex-api-client']={...n['x-codex-api-client'],compatibilityMode:e.target.value};})}><option value="strict">严格 Postman</option><option value="extended">文件夹变量扩展</option></select><p className="muted">严格模式：local &gt; data &gt; environment &gt; collection &gt; global；忽略文件夹变量。扩展模式：文件夹变量作为临时变量，优先于运行数据；既有文件夹集合保留此行为。</p></label>}<div className="overview-metrics"><div><b>{countRequests(node)}</b><span>个请求</span></div><div><b>{(node.event||[]).filter((e:any)=>e.script?.exec?.length).length}</b><span>段脚本</span></div></div></div>}
@@ -434,8 +475,8 @@ function App(){
           {editorTab==='请求体'&&<BodyEditor key={active} onIntrospect={introspectGraphql} request={request} edit={edit} theme={theme} upload={f=>safe(()=>upload(f))}/>}
           {editorTab==='脚本'&&<><div className="script-toolbar"><div className="segmented"><button className={scriptStage==='prerequest'?'active':''} onClick={()=>{setScriptStage('prerequest');scriptViews.current.set(active,'prerequest');}}>请求前</button><button className={scriptStage==='test'?'active':''} onClick={()=>{setScriptStage('test');scriptViews.current.set(active,'test');}}>响应后</button></div><button className="text-button" onClick={()=>edit(n=>setScript(n,scriptStage,scriptStage==='test'?'pm.test("状态为 200", () => {\n  pm.response.to.have.status(200);\n});':'// 在请求前设置变量或生成签名\npm.variables.set("timestamp", Date.now());'))}>插入示例</button></div><CodeEditor testId="script-editor" value={getScript(node,scriptStage)} onChange={value=>edit(n=>setScript(n,scriptStage,value))} theme={theme}/><p className="panel-caption">{scriptStage==='prerequest'?'请求前':'响应后'}按集合 → 外层文件夹 → 内层文件夹 → 请求执行。支持 pm.* 脚本和断言。</p></>}
         </div></section>
-        {showResponse&&<><div className="horizontal-handle" role="separator" aria-label="调整请求与响应高度" onPointerDown={e=>resize(e,'split')}/>
-        <section className="response-pane"><div className="response-heading"><b>响应</b>{result&&<button className="text-button" onClick={()=>safe(()=>download('run-report.json',stringify(result)))}>导出报告</button>}{selectedResponse&&<><span className={'status-code '+(selectedResponse.code>=400?'bad':'')}>{selectedResponse.code} {selectedResponse.status}</span><span>{Math.round(selectedResponse.time)} ms</span><span>{Math.round((selectedResponse.size?.body||0)/1024*10)/10} KB</span></>}{running&&<><span className="spinner"/><span>请求执行中</span><button className="text-button" onClick={()=>safe(()=>call('api_run_cancel',{runId:result.id}))}>取消</button></>}{result&&result.status!=='running'&&<small>{({completed:'运行完成',cancelled:'已取消',failed:'运行失败'} as any)[result.status]}</small>}</div>
+        {showResponse&&<><div className="horizontal-handle" hidden={!!paneView} role="separator" aria-label="调整请求与响应高度" onPointerDown={e=>resize(e,'split')}/>
+        <section {...paneProps('response')}><div className="response-heading"><b>响应</b>{result&&<button className="text-button" onClick={()=>safe(()=>download('run-report.json',stringify(result)))}>导出报告</button>}{selectedResponse&&<><span className={'status-code '+(selectedResponse.code>=400?'bad':'')}>{selectedResponse.code} {selectedResponse.status}</span><span>{Math.round(selectedResponse.time)} ms</span><span>{Math.round((selectedResponse.size?.body||0)/1024*10)/10} KB</span></>}{running&&<><span className="spinner"/><span>请求执行中</span><button className="text-button" onClick={()=>safe(()=>call('api_run_cancel',{runId:result.id}))}>取消</button></>}{result&&result.status!=='running'&&<small>{({completed:'运行完成',cancelled:'已取消',failed:'运行失败'} as any)[result.status]}</small>}{paneControls('response')}</div>
         {result?<><div className="response-tools"><nav>{['正文','响应头','Cookie','断言','日志','变量变化'].map(label=><button key={label} className={responseTab===label?'active':''} onClick={()=>setResponseTab(label)}>{label}{label==='断言'&&<small>{result.assertions.length}</small>}</button>)}</nav>{result.responses.length>1&&<select aria-label="选择响应" value={responseIndex} onChange={e=>setResponseIndex(Number(e.target.value))}>{result.responses.map((r:any,i:number)=><option key={i} value={i}>{i+1}. {r.name} · {r.code}</option>)}</select>}</div>
         {result.errors.length>0&&<div className="run-errors">{result.errors.map((e:any,i:number)=><p key={i}>{e.message}</p>)}</div>}
         <div className={"response-content"+(responseTab==='正文'?" response-body-content":"")}>{responseTab==='正文'&&<ResponsePreview response={selectedResponse} onCopy={body=>safe(async()=>{await navigator.clipboard.writeText(body);setNotice('已复制响应');})}/>}
@@ -474,7 +515,7 @@ function App(){
     {modal==='settings'&&<SettingsPanel value={settingsText} onChange={setSettingsText} theme={theme} onClose={()=>setModal('')} onCookies={()=>{setModal('cookies');}} onSave={data=>safe(async()=>{await call('api_document_put',{kind:'settings',id:'default',revision:settingsRevision,data});await refresh();setModal('');setNotice('设置已保存');})}/>}
     {modal==='cookies'&&<CookieManager document={state.cookies} onClose={()=>setModal('')} onSaved={refresh}/>}
     {confirm&&<Modal title="确认操作" onClose={()=>setConfirm(null)}><p>{confirm.text}</p><footer><button onClick={()=>setConfirm(null)}>保留内容</button><button className="primary" onClick={()=>{const action=confirm.action;setConfirm(null);action();}}>确认</button></footer></Modal>}
-    {modal&&error&&<div className="modal-error" role="alert">{error}<button onClick={()=>setError('')}>×</button></div>}
+    {(modal||popup)&&error&&<div className="modal-error" role="alert">{error}<button onClick={()=>setError('')}>×</button></div>}
   </div>;
 }
 function ReadTable({rows}:{rows:any[]}){return <table className="read-table"><thead><tr><th>名称</th><th>值</th></tr></thead><tbody>{rows.map((v,i)=><tr key={i}><td>{v.key}</td><td>{typeof v.value==='string'?v.value:stringify(v.value)}</td></tr>)}</tbody></table>;}

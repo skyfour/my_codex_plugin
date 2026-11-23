@@ -164,3 +164,120 @@ test('workspace refresh removes externally deleted clean request tabs while pres
  await side(page,'B').last().click();await page.getByLabel('URL',{exact:true}).fill(echo+'/keep-deleted-draft');const fresh=await api(page,'api_document_get',{kind:'collection',id:doc.id});await api(page,'api_item_edit',{collectionId:doc.id,revision:fresh.revision,operation:'delete',itemId:fresh.data.item[1].id});await page.getByLabel('刷新工作区').click();
  await expect(page.getByLabel('URL',{exact:true})).toHaveValue(echo+'/keep-deleted-draft');await expect(page.getByText('未保存',{exact:true})).toBeVisible();
 });
+
+test('request draft and live response survive pane expansion and popups',async({page})=>{
+ const doc=await setup(page);
+ await side(page,'A').last().click();
+ await send(page,'/pane-layout-response');
+ const button=(name:string)=>page.getByRole('button',{name,exact:true});
+ const request=page.locator('.request-pane'),response=page.locator('.response-pane');
+ const requestHeight=(await request.boundingBox())!.height,responseHeight=(await response.boundingBox())!.height;
+ const search=page.getByLabel('搜索响应',{exact:true});
+ await search.fill('pane-layout-response');
+
+ await nav(page,'请求体').click();
+ await page.getByLabel('请求体类型').selectOption('json');
+ await cm(page).fill('{"draft":"inline"}');
+ const editor=await cm(page).elementHandle();
+ const editorHeight=(await request.locator('.code-editor').boundingBox())!.height;
+ await button('展开请求区').click();
+ await expect(response).toBeHidden();
+ await expect.poll(async()=>(await request.boundingBox())?.height||0).toBeGreaterThan(requestHeight);
+ await expect.poll(async()=>(await request.locator('.code-editor').boundingBox())?.height||0).toBeGreaterThan(editorHeight);
+ await expect(cm(page)).toContainText('{"draft":"inline"}');
+
+ await button('弹窗查看请求').click();
+ const requestDialog=page.getByRole('dialog',{name:'请求区',exact:true});
+ const popupEditor=requestDialog.locator('.cm-content');
+ expect(await popupEditor.evaluate((node,previous)=>node===previous,editor)).toBe(true);
+ await expect(popupEditor).toContainText('{"draft":"inline"}');
+ await expect(requestDialog.getByRole('button',{name:'发送',exact:true})).toBeInViewport();
+ await expect(requestDialog.getByRole('button',{name:'关闭弹窗',exact:true})).toBeFocused();
+ await requestDialog.getByRole('button',{name:'更多操作',exact:true}).click();
+ await page.keyboard.press('Escape');
+ await expect(requestDialog).toBeVisible();
+ await popupEditor.fill('{"draft":"edited in popup"}');
+ await popupEditor.dispatchEvent('keydown',{key:'Escape',isComposing:true});
+ await expect(requestDialog).toBeVisible();
+ await page.keyboard.press('Escape');
+ await expect(requestDialog).toBeHidden();
+ await expect(response).toBeHidden();
+ await expect(button('弹窗查看请求')).toBeFocused();
+ await expect(cm(page)).toContainText('{"draft":"edited in popup"}');
+
+ await nav(page,'脚本').click();
+ await button('响应后').click();
+ await cm(page).fill('pm.test("pane script survives",()=>{});');
+ await button('弹窗查看请求').click();
+ await expect(requestDialog.getByTestId('script-editor')).toContainText('pane script survives');
+ await requestDialog.getByRole('button',{name:'关闭弹窗',exact:true}).click();
+ await expect(requestDialog).toBeHidden();
+ await button('恢复分屏').click();
+ await expect(response).toBeVisible();
+ await expect(search).toHaveValue('pane-layout-response');
+
+ await button('展开响应区').click();
+ await expect(request).toBeHidden();
+ await expect.poll(async()=>(await response.boundingBox())?.height||0).toBeGreaterThan(responseHeight);
+ await button('弹窗查看响应').click();
+ const responseDialog=page.getByRole('dialog',{name:'响应区',exact:true});
+ const popupSearch=responseDialog.getByLabel('搜索响应',{exact:true});
+ await expect(responseDialog.getByTestId('response-body')).toContainText('/pane-layout-response');
+ await expect(popupSearch).toBeInViewport();
+ await expect(popupSearch).toHaveValue('pane-layout-response');
+ await popupSearch.fill('layout-response');
+ await expect(responseDialog.locator('mark')).toHaveText('layout-response');
+ await responseDialog.getByRole('button',{name:'关闭弹窗',exact:true}).click();
+ await expect(responseDialog).toBeHidden();
+ await expect(request).toBeHidden();
+ await expect(search).toHaveValue('layout-response');
+
+ await button('查看请求').click();
+ await expect(response).toBeHidden();
+ await expect(button('恢复分屏')).toBeFocused();
+ await button('恢复分屏').click();
+ await expect(request).toBeVisible();
+ await expect(page.getByTestId('script-editor')).toContainText('pane script survives');
+ await nav(page,'请求体').click();
+ await expect(cm(page)).toContainText('{"draft":"edited in popup"}');
+ await expect(page.getByText('未保存',{exact:true})).toBeVisible();
+ const stored=await api(page,'api_document_get',{kind:'collection',id:doc.id});
+ expect(stored.data.item[0].item[0].item[0].request.body).toBeUndefined();
+});
+
+test('narrow top toolbar stays on one row with a usable environment popup',async({page})=>{
+ await page.setViewportSize({width:620,height:700});
+ await setup(page);
+ const name='一个较长的环境名称用于验证顶部工具栏一行展示';
+ await api(page,'api_document_put',{kind:'environment',revision:0,data:{name,values:[{key:'toolbar_probe',value:'toolbar-popup-value'}]}});
+ await page.getByRole('button',{name:'刷新工作区',exact:true}).click();
+ const header=page.locator('.app-header');
+ const choose=header.getByRole('button',{name:'选择环境',exact:true});
+ await choose.click();
+ await page.getByRole('option',{name:new RegExp(name)}).click();
+ await expect(header.getByRole('button',{name:'编辑当前环境',exact:true})).toBeVisible();
+ const controls=header.locator('.brand,.sidebar-toggle,.environment-trigger,.environment-variables-button,.environment-quick-edit,.header-actions button');
+ await expect(controls).toHaveCount(7);
+ const measurements=await controls.evaluateAll(elements=>elements.map(element=>{
+  const {left,right,top,bottom}=element.getBoundingClientRect();
+  const middle=(top+bottom)/2;
+  return {left,right,middle,hit:element.contains(document.elementFromPoint((left+right)/2,middle))};
+ }));
+ const centers=measurements.map(control=>control.middle);
+ expect(Math.max(...centers)-Math.min(...centers)).toBeLessThan(4);
+ expect(measurements.every(control=>control.hit&&control.left>=0&&control.right<=620)).toBe(true);
+ const byPosition=measurements.sort((a,b)=>a.left-b.left);
+ expect(byPosition.every((control,i)=>i===0||control.left>=byPosition[i-1].right-1)).toBe(true);
+
+ await header.getByRole('button',{name:'查看环境变量',exact:true}).click();
+ const popup=page.getByRole('dialog',{name:'变量预览',exact:true});
+ await expect(popup).toBeVisible();
+ await expect(popup.getByText('toolbar-popup-value',{exact:true})).toBeInViewport();
+ const popupBounds=(await popup.boundingBox())!;
+ expect(popupBounds.x).toBeGreaterThanOrEqual(0);
+ expect(popupBounds.x+popupBounds.width).toBeLessThanOrEqual(620);
+ await page.keyboard.press('Escape');
+ await expect(popup).toBeHidden();
+ await choose.click();
+ await page.getByRole('option',{name:/^无环境/}).click();
+});
