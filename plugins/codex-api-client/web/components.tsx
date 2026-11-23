@@ -1,5 +1,5 @@
 import {AUTH_FIELDS,AUTH_SECRETS,AUTH_BOOLEANS,AUTH_DEFAULTS,AUTH_REQUIRED} from '../src/auth.mjs';
-import {useEffect,useRef,type ReactNode} from 'react';
+import {useEffect,useRef,type ReactNode,type RefObject} from 'react';
 export type Row={id?:string,key:string,value?:string,type?:string,disabled?:boolean,secretRef?:string,src?:string,description?:string};
 export function Rows({rows,onChange,variables=false,files=false,onUpload,onUploaded}:{rows:Row[],onChange:(rows:Row[])=>void,variables?:boolean,files?:boolean,onUpload?:(file:File)=>Promise<string>,onUploaded?:(id:string,path:string)=>void}){
   const latest=useRef({rows,onChange});latest.current={rows,onChange};
@@ -15,23 +15,31 @@ export function Rows({rows,onChange,variables=false,files=false,onUpload,onUploa
     {i<rows.length?<button className="icon-button" aria-label={`删除行 ${i+1}`} onClick={()=>onChange(rows.filter((_,n)=>n!==i))}>×</button>:<span/>}
   </div>)}<button className="text-button" onClick={add}>＋ 添加一行</button></div>;
 }
-export function Modal({title,children,onClose,wide=false,className=''}:{title:string,children:ReactNode,onClose:()=>void,wide?:boolean,className?:string}){
-  const ref=useRef<HTMLElement>(null),close=useRef(onClose);close.current=onClose;
+export function useDialogFocus(ref:RefObject<HTMLElement|null>,onClose:()=>void,open=true,trigger?:RefObject<HTMLElement|null>){
+  const close=useRef(onClose);close.current=onClose;
   useEffect(()=>{
-    const dialog=ref.current!,previous=document.activeElement as HTMLElement|null;
-    (dialog.querySelector<HTMLElement>('[role=tab][aria-selected=true],button')||dialog).focus();
+    const dialog=ref.current;
+    if(!open||!dialog)return;
+    const previous=trigger?.current||(document.activeElement as HTMLElement|null);
+    (dialog.querySelector<HTMLElement>('[data-dialog-focus]')||dialog.querySelector<HTMLElement>('[role=tab][aria-selected=true],button')||dialog).focus({preventScroll:true});
     const key=(e:KeyboardEvent)=>{
-      if(Array.from(document.querySelectorAll('[role=dialog]')).at(-1)!==dialog)return;
+      if(e.defaultPrevented||e.isComposing||Array.from(document.querySelectorAll('[role=dialog]')).at(-1)!==dialog)return;
       if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close.current();}
       if(e.key==='Tab'){
-        const items=Array.from(dialog.querySelectorAll<HTMLElement>('button,input,select,textarea,[tabindex],[contenteditable=true]')).filter(el=>el.tabIndex>=0&&!el.matches(':disabled')&&el.getClientRects().length>0);
+        const items=Array.from(dialog.querySelectorAll<HTMLElement>('button,input,select,textarea,iframe,[tabindex],[contenteditable=true]')).filter(el=>el.tabIndex>=0&&!el.matches(':disabled')&&el.getClientRects().length>0);
         const first=items[0],last=items.at(-1);
         if(e.shiftKey&&(document.activeElement===first||!dialog.contains(document.activeElement))){e.preventDefault();last?.focus();}
         else if(!e.shiftKey&&(document.activeElement===last||!dialog.contains(document.activeElement))){e.preventDefault();first?.focus();}
       }
     };
-    document.addEventListener('keydown',key,true);return()=>{document.removeEventListener('keydown',key,true);if(previous?.isConnected)previous.focus();};
-  },[]);
+    // An in-place pane lets the editor handle shortcuts such as dismissing completions first.
+    const capture=!trigger;
+    document.addEventListener('keydown',key,capture);return()=>{document.removeEventListener('keydown',key,capture);if(previous?.isConnected)previous.focus({preventScroll:true});};
+  },[open,ref,trigger]);
+}
+export function Modal({title,children,onClose,wide=false,className=''}:{title:string,children:ReactNode,onClose:()=>void,wide?:boolean,className?:string}){
+  const ref=useRef<HTMLElement>(null);
+  useDialogFocus(ref,onClose);
   return <div className="backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={'modal '+(wide?'wide':'')+' '+className}><header><h2>{title}</h2><button aria-label="关闭" onClick={onClose}>×</button></header>{children}</section></div>;
 }
 export function AuthEditor({auth,onChange}:{auth:any,onChange:(auth:any)=>void}){
